@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Atelier 3D Pavilion Prototype</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#1e1712;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+  .top{
+    position:fixed;left:0;right:0;top:0;height:58px;z-index:20;
+    display:flex;align-items:center;padding:0 24px;color:white;
+    background:rgba(49,35,27,.88);backdrop-filter:blur(10px);
+    border-bottom:1px solid rgba(255,255,255,.08)
+  }
+  .brand{font:italic 28px Georgia,serif;margin-right:38px}
+  .nav{display:flex;gap:8px}
+  .nav button{border:0;background:transparent;color:#eadfd5;font-weight:800;padding:9px 15px;border-radius:20px}
+  .nav button.on{background:rgba(255,255,255,.1)}
+  .online{margin-left:auto;font-size:13px;color:#efe5db}
+  .online i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#65d05d;margin-right:7px}
+  .help{
+    position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:20;
+    color:#4c382c;background:rgba(255,248,236,.94);padding:9px 14px;border-radius:18px;
+    box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:12px
+  }
+  .timer{
+    position:fixed;left:20px;bottom:20px;z-index:20;color:white;
+    background:rgba(51,36,27,.9);padding:11px 15px;border-radius:24px;
+    display:flex;align-items:center;gap:10px;backdrop-filter:blur(8px)
+  }
+  .timer .dot{width:8px;height:8px;border-radius:50%;background:#65d05d}
+  .timer b{font-size:18px}
+  .legend{
+    position:fixed;right:20px;bottom:20px;z-index:20;color:white;
+    background:rgba(51,36,27,.85);padding:9px 12px;border-radius:16px;font-size:12px
+  }
+  .tip{
+    position:fixed;z-index:25;display:none;pointer-events:none;
+    color:white;background:rgba(43,30,23,.92);padding:8px 10px;border-radius:11px;font-size:12px
+  }
+
+  /* full artwork modal */
+  .modal{
+    position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    background:rgba(18,12,9,.82);backdrop-filter:blur(10px);padding:30px
+  }
+  .modal.open{display:flex}
+  .viewer{
+    width:min(1320px,95vw);height:min(820px,91vh);background:#f7f1e9;border-radius:26px;
+    box-shadow:0 40px 120px rgba(0,0,0,.48);padding:24px 24px 20px;
+    display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.7)
+  }
+  .viewerTop{display:flex;justify-content:flex-end;height:36px}
+  .close{border:0;background:none;font-size:30px;line-height:1;color:#5a493f;cursor:pointer}
+  .artArea{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+  #artLarge{
+    max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;
+    box-shadow:0 18px 55px rgba(61,40,27,.22);background:#eee6dc
+  }
+  .process{padding:12px 3px 4px}
+  .process input{width:100%;accent-color:#b57431}
+  .steps{display:flex;justify-content:space-between;color:#827267;font-size:11px;margin-top:2px}
+  .caption{
+    display:flex;align-items:flex-end;justify-content:space-between;padding-top:10px;border-top:1px solid #dfd4c9
+  }
+  .caption h2{margin:0;font-size:23px;color:#302219}
+  .caption p{margin:4px 0 0;color:#7b6a5e;font-size:13px}
+  .like{border:1px solid #a5968a;background:white;border-radius:15px;padding:10px 15px;font-weight:800;color:#453329}
+  #loading{
+    position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+    background:#2b2019;color:white;font-size:14px
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="loading">3D 아틀리에 불러오는 중…</div>
+<div class="top">
+  <div class="brand">Atelier</div>
+  <div class="nav"><button class="on">아틀리에</button><button>내 작품</button><button>전시관</button></div>
+  <div class="online"><i></i>지금 18명</div>
+</div>
+<div class="timer"><span class="dot"></span><span>작업 타이머</span><b id="clock">01:24:18</b></div>
+<div class="help">WASD / 방향키로 이동 · 마우스 드래그로 시점 회전 · 이젤 클릭으로 작품 보기</div>
+<div class="legend">베레모 기본 · 스케치 ✏ · 채색 🎨</div>
+<div id="tip" class="tip"></div>
+
+<div id="modal" class="modal">
+  <div class="viewer">
+    <div class="viewerTop"><button class="close" id="close">×</button></div>
+    <div class="artArea"><img id="artLarge" /></div>
+    <div class="process">
+      <input id="processSlider" type="range" min="0" max="4" value="4" step="1">
+      <div class="steps"><span>스케치</span><span>밑색</span><span>중간</span><span>채색</span><span>완성</span></div>
+    </div>
+    <div class="caption">
+      <div><h2 id="artTitle">봄의 강변</h2><p id="artNick">@lumisketch</p></div>
+      <button class="like" id="like">♡ 좋아요</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+/* =========================
+   USER-TUNABLE CONFIG
+   ========================= */
+const CONFIG = {
+  floor: {
+    radius: 10.5,
+    plankLineOpacity: 0.055,     // 바닥 갈색 선 농도
+    ringLineOpacity: 0.07
+  },
+  avatar: {
+    scale: 1.0,
+    beretY: 1.635,               // 모자 높이
+    beretX: 0.0,                 // 모자 좌우
+    beretZ: 0.015,               // 모자 앞뒤
+    beretTilt: -0.13,
+    apronColor: 0xd9c3a8,
+    walkingLegSwing: 0.48,
+    walkingArmSwing: 0.38
+  },
+  easel: {
+    artZ: 0.055,                 // 그림을 프레임보다 앞으로
+    frameZ: -0.015,              // 나무 프레임은 뒤로
+    supportBarY: 0.69,
+    supportBarZ: -0.06           // 그림 앞을 가리지 않도록 뒤로
+  },
+  flowers: {
+    enabled: true,
+    density: 7
+  }
+};
+
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe2ff);
+scene.fog = new THREE.Fog(0xdde7df, 22, 40);
+
+const camera = new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,100);
+camera.position.set(0,4.4,8);
+
+const hemi = new THREE.HemisphereLight(0xfff4dc,0x6f8295,2.4);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1c9,4.3);
+sun.position.set(-9,14,6); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-18;sun.shadow.camera.right=18;sun.shadow.camera.top=18;sun.shadow.camera.bottom=-18;
+scene.add(sun);
+
+const wood = new THREE.MeshStandardMaterial({color:0xa66f43,roughness:.65,metalness:.02});
+const darkWood = new THREE.MeshStandardMaterial({color:0x66422b,roughness:.75});
+const brass = new THREE.MeshStandardMaterial({color:0xc48a35,roughness:.35,metalness:.55});
+const glass = new THREE.MeshPhysicalMaterial({color:0xbbe4f2,transparent:true,opacity:.23,roughness:.08,metalness:0,transmission:.35,side:THREE.DoubleSide});
+
+function mesh(g,m,cast=true,receive=true){
+  const o=new THREE.Mesh(g,m);o.castShadow=cast;o.receiveShadow=receive;return o;
+}
+
+/* ---------- pavilion ---------- */
+const floor = mesh(
+  new THREE.CylinderGeometry(CONFIG.floor.radius,CONFIG.floor.radius,.5,96),
+  new THREE.MeshStandardMaterial({color:0xb67d52,roughness:.74}), false,true
+);
+floor.position.y=-.25; scene.add(floor);
+const innerFloor = mesh(
+  new THREE.CylinderGeometry(8.7,8.7,.055,96),
+  new THREE.MeshStandardMaterial({color:0xc99364,roughness:.68}), false,true
+);
+innerFloor.position.y=.03; scene.add(innerFloor);
+
+/* softer floor lines */
+for(let i=0;i<28;i++){
+  const a=i/28*Math.PI*2;
+  const mat = new THREE.MeshBasicMaterial({color:0x4b3328,transparent:true,opacity:CONFIG.floor.plankLineOpacity,depthWrite:false});
+  const strip=mesh(new THREE.BoxGeometry(.024,.012,8.5),mat,false,false);
+  strip.position.set(Math.sin(a)*4.15,.078,Math.cos(a)*4.15);
+  strip.rotation.y=a;
+  scene.add(strip);
+}
+for(const r of [2.6,5.4,8.2]){
+  const mat = new THREE.MeshBasicMaterial({color:0x4b3328,transparent:true,opacity:CONFIG.floor.ringLineOpacity,depthWrite:false});
+  const ring=mesh(new THREE.TorusGeometry(r,.022,8,96),mat,false,false);
+  ring.rotation.x=Math.PI/2; ring.position.y=.081;scene.add(ring);
+}
+
+/* columns and dome */
+const N=12;
+const columns=[];
+for(let i=0;i<N;i++){
+  const a=i/N*Math.PI*2;
+  const x=Math.sin(a)*9.5,z=Math.cos(a)*9.5;
+  const col=mesh(new THREE.CylinderGeometry(.24,.3,4.6,20),wood);
+  col.position.set(x,2.3,z);scene.add(col);columns.push({x,z,a});
+  const cap=mesh(new THREE.CylinderGeometry(.38,.34,.24,20),brass);
+  cap.position.set(x,4.55,z);scene.add(cap);
+  const beam=mesh(new THREE.BoxGeometry(.18,.18,9.7),wood);
+  beam.position.set(Math.sin(a)*4.8,5.45,Math.cos(a)*4.8);
+  beam.rotation.y=a; beam.rotation.x=-.14; scene.add(beam);
+}
+for(const [r,y,t] of [[9.5,4.7,.18],[7.5,5.45,.14],[4.8,6.1,.12]]){
+  const ring=mesh(new THREE.TorusGeometry(r,t,10,96),wood);
+  ring.rotation.x=Math.PI/2;ring.position.y=y;scene.add(ring);
+}
+const dome=mesh(new THREE.SphereGeometry(9.55,64,32,0,Math.PI*2,0,Math.PI/2),glass,false,false);
+dome.scale.y=.72; dome.position.y=4.65; scene.add(dome);
+
+/* chandelier */
+const chRing=mesh(new THREE.TorusGeometry(1.35,.09,10,48),brass);
+chRing.rotation.x=Math.PI/2;chRing.position.y=5.4;scene.add(chRing);
+for(let i=0;i<10;i++){
+  const a=i/10*Math.PI*2;
+  const bulb=mesh(new THREE.SphereGeometry(.09,12,8),new THREE.MeshStandardMaterial({color:0xffe5a7,emissive:0xffc45b,emissiveIntensity:2.4}),false,false);
+  bulb.position.set(Math.sin(a)*1.35,5.32,Math.cos(a)*1.35);scene.add(bulb);
+}
+
+/* flower / vine decoration */
+function addFlowerCluster(x,y,z,scale=1, hue=0){
+  const stemMat = new THREE.MeshStandardMaterial({color:0x4d7c48,roughness:.9});
+  const leafMat = new THREE.MeshStandardMaterial({color:0x5f9155,roughness:.9});
+  const petalColors=[0xf1a5bc,0xe8c3df,0xf6d0dd,0xdca6d8,0xf3b5c0];
+  for(let i=0;i<CONFIG.flowers.density;i++){
+    const ang=(i/CONFIG.flowers.density)*Math.PI*2;
+    const sx=x+Math.cos(ang)*(.18+.08*(i%2))*scale;
+    const sz=z+Math.sin(ang)*(.18+.08*(i%2))*scale;
+    const stem=mesh(new THREE.CylinderGeometry(.012*scale,.018*scale,.6*scale,7),stemMat,false,false);
+    stem.position.set(sx,y-.25*scale,sz);
+    stem.rotation.z=(Math.random()-.5)*.5;scene.add(stem);
+    const leaf=mesh(new THREE.SphereGeometry(.09*scale,10,8),leafMat,false,false);
+    leaf.scale.set(1.6,.5,.8);leaf.position.set(sx+.08*scale,y-.1*scale,sz);scene.add(leaf);
+    const center = new THREE.Group();
+    for(let p=0;p<6;p++){
+      const a=p/6*Math.PI*2;
+      const pet=mesh(new THREE.SphereGeometry(.055*scale,10,8),
+        new THREE.MeshStandardMaterial({color:petalColors[(i+hue)%petalColors.length],roughness:.9}),false,false);
+      pet.scale.set(1.5,.65,.8);
+      pet.position.set(Math.cos(a)*.06*scale,Math.sin(a)*.06*scale,0);
+      center.add(pet);
+    }
+    const core=mesh(new THREE.SphereGeometry(.025*scale,8,6),new THREE.MeshStandardMaterial({color:0xe3ae45}),false,false);
+    center.add(core);
+    center.position.set(sx,y+.08*scale,sz);center.rotation.x=Math.PI/2;scene.add(center);
+  }
+}
+if(CONFIG.flowers.enabled){
+  columns.filter((_,i)=>i%2===0).forEach((c,i)=>addFlowerCluster(c.x*.92,4.3,c.z*.92,.85,i));
+  for(let i=0;i<10;i++){
+    const a=i/10*Math.PI*2;
+    addFlowerCluster(Math.sin(a)*7.7,5.25,Math.cos(a)*7.7,.58,i+2);
+  }
+}
+
+/* center table */
+const centerBase=mesh(new THREE.CylinderGeometry(1.6,1.7,.65,48),darkWood);centerBase.position.y=.33;scene.add(centerBase);
+const centerTop=mesh(new THREE.CylinderGeometry(1.85,1.85,.16,48),wood);centerTop.position.y=.74;scene.add(centerTop);
+for(let i=0;i<7;i++){
+  const a=i/7*Math.PI*2;
+  const pot=mesh(new THREE.CylinderGeometry(.15,.18,.28,16),new THREE.MeshStandardMaterial({color:0xd3a36c,roughness:.8}));
+  pot.position.set(Math.sin(a)*1.05,.96,Math.cos(a)*1.05);scene.add(pot);
+}
+
+/* stool */
+function addStool(x,z,rot=0){
+  const g=new THREE.Group();
+  const seat=mesh(new THREE.CylinderGeometry(.34,.34,.11,24),wood);seat.position.y=.55;g.add(seat);
+  for(let i=0;i<3;i++){
+    const a=i/3*Math.PI*2+rot;
+    const leg=mesh(new THREE.CylinderGeometry(.045,.055,.55,10),darkWood);
+    leg.position.set(Math.sin(a)*.2,.28,Math.cos(a)*.2);leg.rotation.z=Math.sin(a)*.12;g.add(leg);
+  }
+  g.position.set(x,0,z);scene.add(g);return g;
+}
+
+/* ---------- procedural paintings ---------- */
+function artCanvas(theme,stage=4){
+  const c=document.createElement('canvas'); c.width=900;c.height=680; const g=c.getContext('2d');
+  g.fillStyle='#f4eadc';g.fillRect(0,0,c.width,c.height);
+  if(stage===0){
+    g.strokeStyle='#6d6258';g.lineWidth=3;
+    for(let i=0;i<8;i++){g.beginPath();g.moveTo(0,520-i*20);for(let x=0;x<=900;x+=70)g.lineTo(x,440-i*10+Math.sin(x*.012+i)*50);g.stroke()}
+    g.beginPath();g.arc(650,220,95,0,Math.PI*2);g.stroke();
+  } else {
+    let grd=g.createLinearGradient(0,0,0,680);grd.addColorStop(0,theme.sky);grd.addColorStop(1,theme.ground);g.fillStyle=grd;g.fillRect(0,0,900,680);
+    g.fillStyle=theme.sun;g.beginPath();g.arc(650,170,70,0,Math.PI*2);g.fill();
+    for(let layer=0;layer<4;layer++){
+      g.fillStyle=theme.hills[layer];g.beginPath();g.moveTo(0,530-layer*45);
+      for(let x=0;x<=900;x+=90)g.lineTo(x,470-layer*45+Math.sin(x*.009+layer)*55);
+      g.lineTo(900,680);g.lineTo(0,680);g.closePath();g.fill();
+    }
+    if(stage>=2){g.fillStyle=theme.water;g.beginPath();g.ellipse(460,545,410,120,0,0,Math.PI*2);g.fill()}
+    if(stage>=3){for(let i=0;i<35;i++){g.fillStyle=i%2?theme.flower:'#fff0d7';g.beginPath();g.arc((i*73)%900,410+(i*37)%230,7+(i%5),0,Math.PI*2);g.fill()}}
+    if(stage>=4){g.strokeStyle='rgba(255,255,255,.55)';g.lineWidth=5;for(let i=0;i<18;i++){g.beginPath();g.moveTo((i*97)%900,500+(i%5)*17);g.lineTo(((i*97)+110)%900,506+(i%5)*17);g.stroke()}}
+  }
+  return c.toDataURL('image/jpeg',.9);
+}
+const themes=[
+ {sky:'#b9d9ef',ground:'#d8ba7d',sun:'#fff0bd',hills:['#a8bd7c','#7d9c67','#5f7d54','#3f6548'],water:'#72acc4',flower:'#e894a1'},
+ {sky:'#d9c8ef',ground:'#b99b7d',sun:'#f8d4b1',hills:['#b39a7a','#8d756a','#735e59','#564847'],water:'#8c92ba',flower:'#d8b55b'},
+ {sky:'#cde6d2',ground:'#d7c1a5',sun:'#fff6c5',hills:['#a9c398','#7da77f','#5c8c6c','#3e7057'],water:'#79b8aa',flower:'#f1a1c2'},
+ {sky:'#e9c6b1',ground:'#b78d6d',sun:'#ffe1a7',hills:['#bd9971','#9e765d','#7c5c50','#5f4942'],water:'#8aa2b2',flower:'#dd796f'},
+ {sky:'#b9dbf3',ground:'#d2b58f',sun:'#fff3ba',hills:['#b4c58e','#8eaa72','#66865d','#41694e'],water:'#6bacc1',flower:'#f2a0b0'}
+];
+const artworks=themes.map((t,i)=>({
+  title:['봄의 강변','빛이 머문 언덕','오후의 정원','노을 아래','호숫가의 아침'][i],
+  nick:['@lumisketch','@hanu','@mari','@seo','@rin'][i],
+  stages:[0,1,2,3,4].map(s=>artCanvas(t,s))
+}));
+
+/* ---------- easels ---------- */
+const easelGroup = new THREE.Group(); scene.add(easelGroup);
+const easelData=[];
+function addEasel(x,z,rot,artIndex,isMine=false){
+  const root=new THREE.Group();root.position.set(x,0,z);root.rotation.y=rot;
+  const leg1=mesh(new THREE.BoxGeometry(.1,1.8,.1),wood);leg1.position.set(-.42,.9,CONFIG.easel.frameZ);leg1.rotation.z=-.12;root.add(leg1);
+  const leg2=mesh(new THREE.BoxGeometry(.1,1.8,.1),wood);leg2.position.set(.42,.9,CONFIG.easel.frameZ);leg2.rotation.z=.12;root.add(leg2);
+  const back=mesh(new THREE.BoxGeometry(.1,1.65,.1),wood);back.position.set(0,.82,.18);back.rotation.x=-.14;root.add(back);
+  const bar=mesh(new THREE.BoxGeometry(1.2,.1,.14),wood);bar.position.set(0,CONFIG.easel.supportBarY,CONFIG.easel.supportBarZ);root.add(bar);
+
+  const artGeo=new THREE.PlaneGeometry(1.15,1.0);
+  const tex=new THREE.TextureLoader().load(artworks[artIndex].stages[4]);tex.colorSpace=THREE.SRGBColorSpace;
+  const art=mesh(artGeo,new THREE.MeshStandardMaterial({map:tex,roughness:.7}),false,false);
+  art.position.set(0,1.38,CONFIG.easel.artZ);root.add(art);
+  art.userData.kind='art';art.userData.artIndex=artIndex;
+
+  const stool = addStool(x+Math.sin(rot+.82)*.95,z+Math.cos(rot+.82)*.95,rot);
+  const seatPos = new THREE.Vector3(stool.position.x,.55,stool.position.z);
+
+  easelData.push({root,art,artIndex,isMine,seatPos,rot});
+  easelGroup.add(root);
+}
+[
+ [-6.6,2.1,.25,0,true],[-3.7,-5.9,-.25,1,false],[1.6,-6.8,-.55,2,false],[6.3,-2.7,-1.0,3,false],
+ [6.7,3.0,-2.4,4,false],[2.6,6.5,2.85,0,false],[-2.6,6.7,3.2,1,false],[-6.4,-2.5,.8,2,false]
+].forEach(e=>addEasel(...e));
+const myEasel = easelData.find(e=>e.isMine);
+
+/* ---------- tools ---------- */
+function createPencil(){
+  const g=new THREE.Group();
+  const yellow=new THREE.MeshStandardMaterial({color:0xe1aa2c,roughness:.7});
+  const woodTip=new THREE.MeshStandardMaterial({color:0xd7b087,roughness:.8});
+  const graphite=new THREE.MeshStandardMaterial({color:0x343434,roughness:.75});
+  const eraser=new THREE.MeshStandardMaterial({color:0xd87576,roughness:.75});
+  const ferrule=new THREE.MeshStandardMaterial({color:0xb9b9b7,roughness:.35,metalness:.6});
+  const shaft=mesh(new THREE.CylinderGeometry(.028,.028,.52,6),yellow);shaft.rotation.z=-.75;g.add(shaft);
+  const tip=mesh(new THREE.ConeGeometry(.029,.12,6),woodTip);tip.rotation.z=-.75;tip.position.set(.08,-.08,0);g.add(tip);
+  const lead=mesh(new THREE.ConeGeometry(.012,.055,6),graphite);lead.rotation.z=-.75;lead.position.set(.12,-.12,0);g.add(lead);
+  const ferr=mesh(new THREE.CylinderGeometry(.031,.031,.07,12),ferrule);ferr.rotation.z=-.75;ferr.position.set(-.18,.18,0);g.add(ferr);
+  const era=mesh(new THREE.CylinderGeometry(.032,.032,.065,12),eraser);era.rotation.z=-.75;era.position.set(-.205,.205,0);g.add(era);
+  return g;
+}
+function createPalette(){
+  const shape=new THREE.Shape();
+  shape.absellipse(0,0,.22,.16,0,Math.PI*2,false,0);
+  const hole=new THREE.Path();
+  hole.absellipse(.105,.035,.045,.055,0,Math.PI*2,true,0);
+  shape.holes.push(hole);
+  const geo=new THREE.ExtrudeGeometry(shape,{depth:.025,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.012,bevelThickness:.012});
+  const pal=mesh(geo,new THREE.MeshStandardMaterial({color:0xc8925f,roughness:.82}),false,false);
+  pal.rotation.x=-Math.PI/2;pal.rotation.z=.2;
+  const g=new THREE.Group();g.add(pal);
+  const colors=[0xd74e45,0x4e83ba,0xe3b944,0x5d994f,0x8d5ca9];
+  const pts=[[-.09,.055],[-.015,.09],[.055,.085],[-.12,-.015],[-.035,-.02]];
+  colors.forEach((c,i)=>{
+    const dab=mesh(new THREE.SphereGeometry(.023,10,8),new THREE.MeshStandardMaterial({color:c,roughness:.8}),false,false);
+    dab.scale.y=.35;dab.position.set(pts[i][0],.037,pts[i][1]);g.add(dab);
+  });
+  return g;
+}
+
+/* ---------- avatar ---------- */
+function buildAvatar(beretColor=0x9b4c43,tool='palette'){
+  const g=new THREE.Group();
+  g.scale.setScalar(CONFIG.avatar.scale);
+  const skin=new THREE.MeshStandardMaterial({color:0xf0c7a7,roughness:.8});
+  const shirt=new THREE.MeshStandardMaterial({color:0xf0e4d6,roughness:.88});
+  const pants=new THREE.MeshStandardMaterial({color:0x4b403b,roughness:.9});
+  const apronMat=new THREE.MeshStandardMaterial({color:CONFIG.avatar.apronColor,roughness:.88});
+  const hairMat=new THREE.MeshStandardMaterial({color:0x5a3b2f,roughness:.95});
+
+  const torso=mesh(new THREE.CylinderGeometry(.23,.3,.68,18),shirt);torso.position.y=.86;g.add(torso);
+
+  // apron front
+  const apron=mesh(new THREE.BoxGeometry(.34,.48,.035),apronMat);
+  apron.position.set(0,.83,.255);apron.rotation.x=-.03;g.add(apron);
+  const strapL=mesh(new THREE.BoxGeometry(.035,.46,.025),apronMat);strapL.position.set(-.12,1.08,.235);strapL.rotation.z=-.18;g.add(strapL);
+  const strapR=mesh(new THREE.BoxGeometry(.035,.46,.025),apronMat);strapR.position.set(.12,1.08,.235);strapR.rotation.z=.18;g.add(strapR);
+
+  const head=mesh(new THREE.SphereGeometry(.25,24,16),skin);head.position.y=1.35;g.add(head);
+  const hair=mesh(new THREE.SphereGeometry(.265,24,16),hairMat);hair.scale.set(1,.72,1);hair.position.set(0,1.47,-.06);g.add(hair);
+
+  const beret=mesh(new THREE.SphereGeometry(.29,24,12),new THREE.MeshStandardMaterial({color:beretColor,roughness:.8}));
+  beret.scale.y=.23;beret.rotation.z=CONFIG.avatar.beretTilt;beret.position.set(CONFIG.avatar.beretX,CONFIG.avatar.beretY,CONFIG.avatar.beretZ);g.add(beret);
+  const nub=mesh(new THREE.CylinderGeometry(.018,.025,.08,8),new THREE.MeshStandardMaterial({color:beretColor}));
+  nub.position.set(CONFIG.avatar.beretX+.03,CONFIG.avatar.beretY+.09,CONFIG.avatar.beretZ);g.add(nub);
+
+  const nose=mesh(new THREE.ConeGeometry(.035,.12,10),skin,false,false);nose.rotation.x=Math.PI/2;nose.position.set(0,1.34,.25);g.add(nose);
+
+  // limb pivots
+  const legL=new THREE.Group(),legR=new THREE.Group(),armL=new THREE.Group(),armR=new THREE.Group();
+  const lg1=mesh(new THREE.CylinderGeometry(.07,.075,.55,12),pants);lg1.position.y=-.275;legL.add(lg1);
+  const lg2=mesh(new THREE.CylinderGeometry(.07,.075,.55,12),pants);lg2.position.y=-.275;legR.add(lg2);
+  legL.position.set(-.13,.58,0);legR.position.set(.13,.58,0);g.add(legL,legR);
+
+  const sleeveMat=shirt;
+  const ar1=mesh(new THREE.CylinderGeometry(.055,.06,.48,12),sleeveMat);ar1.position.y=-.24;armL.add(ar1);
+  const ar2=mesh(new THREE.CylinderGeometry(.055,.06,.48,12),sleeveMat);ar2.position.y=-.24;armR.add(ar2);
+  armL.position.set(-.31,1.12,0);armR.position.set(.31,1.12,0);g.add(armL,armR);
+
+  const toolObj = tool==='pencil'?createPencil():createPalette();
+  toolObj.position.set(.02,-.46,.02);toolObj.scale.setScalar(tool==='pencil'?1.0:1.0);armR.add(toolObj);
+
+  g.userData={tool,legL,legR,armL,armR,beret,toolObj,mode:'idle',phase:Math.random()*10};
+  return g;
+}
+function setAvatarTool(av,tool){
+  const armR=av.userData.armR;
+  armR.remove(av.userData.toolObj);
+  const obj=tool==='pencil'?createPencil():createPalette();
+  obj.position.set(.02,-.46,.02);armR.add(obj);
+  av.userData.toolObj=obj;av.userData.tool=tool;
+}
+
+/* player & NPCs */
+const player=buildAvatar(0xa64841,'palette');player.position.set(0,0,3.6);scene.add(player);
+const npcs=[
+ {o:buildAvatar(0x6d4a91,'palette'),a:0,r:4.2,s:.18},
+ {o:buildAvatar(0xd59c35,'palette'),a:2.1,r:5.6,s:-.13},
+ {o:buildAvatar(0x4f7659,'pencil'),a:4.2,r:3.8,s:.11},
+ {o:buildAvatar(0x934d60,'palette'),a:5.4,r:6.6,s:-.09},
+];
+npcs.forEach(n=>scene.add(n.o));
+
+/* ---------- animation helpers ---------- */
+function animateWalk(av,t,speedFactor=1){
+  const d=av.userData,phase=t*7.2*speedFactor+d.phase;
+  d.legL.rotation.x=Math.sin(phase)*CONFIG.avatar.walkingLegSwing;
+  d.legR.rotation.x=-Math.sin(phase)*CONFIG.avatar.walkingLegSwing;
+  d.armL.rotation.x=-Math.sin(phase)*CONFIG.avatar.walkingArmSwing;
+  d.armR.rotation.x=Math.sin(phase)*CONFIG.avatar.walkingArmSwing*.65;
+}
+function animateIdle(av){
+  const d=av.userData;
+  d.legL.rotation.x*=.8;d.legR.rotation.x*=.8;d.armL.rotation.x*=.8;d.armR.rotation.x*=.8;
+}
+function animatePainting(av,t){
+  const d=av.userData;
+  d.legL.rotation.x=-1.25;d.legR.rotation.x=-1.25;
+  d.armL.rotation.x=-.2;
+  d.armR.rotation.x=-.55 + Math.sin(t*4.5)*.22;
+  d.armR.rotation.z=-.25;
+}
+
+/* ---------- controls ---------- */
+let yaw=0,pitch=.28,dragging=false,lastX=0,lastY=0;
+const keys={};
+addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY});
+addEventListener('pointerup',()=>dragging=false);
+addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  yaw-=(e.clientX-lastX)*.006;
+  pitch=THREE.MathUtils.clamp(pitch-(e.clientY-lastY)*.004,.08,.58);
+  lastX=e.clientX;lastY=e.clientY;
+});
+
+/* art hover/click */
+const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2(),tip=document.getElementById('tip');
+renderer.domElement.addEventListener('pointermove',e=>{
+  mouse.x=e.clientX/innerWidth*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+  raycaster.setFromCamera(mouse,camera);
+  const hits=raycaster.intersectObjects(easelData.map(e=>e.art),false);
+  const hoverArt=hits[0]?.object||null;
+  if(hoverArt&&!dragging){
+    const idx=hoverArt.userData.artIndex;
+    tip.textContent=`${artworks[idx].title} · ${artworks[idx].nick}`;
+    tip.style.display='block';tip.style.left=(e.clientX+13)+'px';tip.style.top=(e.clientY+13)+'px';
+  }else tip.style.display='none';
+});
+renderer.domElement.addEventListener('click',e=>{
+  if(dragging)return;
+  mouse.x=e.clientX/innerWidth*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+  raycaster.setFromCamera(mouse,camera);
+  const hits=raycaster.intersectObjects(easelData.map(e=>e.art),false);
+  if(hits.length)openArt(hits[0].object.userData.artIndex);
+});
+
+/* modal */
+const modal=document.getElementById('modal'),artLarge=document.getElementById('artLarge'),slider=document.getElementById('processSlider');
+let currentArt=0,liked=false;
+function showStage(s){artLarge.src=artworks[currentArt].stages[s];slider.value=s}
+function openArt(i){
+  currentArt=i;document.getElementById('artTitle').textContent=artworks[i].title;
+  document.getElementById('artNick').textContent=artworks[i].nick;showStage(4);modal.classList.add('open');
+}
+slider.oninput=e=>showStage(+e.target.value);
+document.getElementById('close').onclick=()=>modal.classList.remove('open');
+modal.onclick=e=>{if(e.target===modal)modal.classList.remove('open')};
+document.getElementById('like').onclick=e=>{liked=!liked;e.currentTarget.textContent=liked?'♥ 좋아요':'♡ 좋아요'};
+
+/* ---------- work timer: click toggles work session ---------- */
+const timerBox=document.querySelector('.timer');
+let sec=1*3600+24*60+18;
+let timerRunning=true;
+let workMode='free'; // free | going | seated
+timerBox.style.cursor='pointer';
+timerBox.title='클릭하면 내 이젤에서 작업 시작/종료';
+timerBox.addEventListener('click',()=>{
+  if(workMode==='free'){
+    workMode='going';
+    timerRunning=true;
+  }else{
+    workMode='free';
+    timerRunning=false;
+    player.userData.mode='idle';
+  }
+});
+setInterval(()=>{
+  if(timerRunning)sec++;
+  const h=String(Math.floor(sec/3600)).padStart(2,'0'),m=String(Math.floor((sec%3600)/60)).padStart(2,'0'),s=String(sec%60).padStart(2,'0');
+  document.getElementById('clock').textContent=`${h}:${m}:${s}`;
+},1000);
+
+/* ---------- main loop ---------- */
+const clock=new THREE.Clock();
+function moveToward(obj,target,speed,dt){
+  const dx=target.x-obj.position.x,dz=target.z-obj.position.z,d=Math.hypot(dx,dz);
+  if(d<.04)return true;
+  obj.position.x+=dx/d*speed*dt;obj.position.z+=dz/d*speed*dt;
+  obj.rotation.y=Math.atan2(dx,dz);
+  animateWalk(obj,performance.now()/1000,1);
+  return false;
+}
+function animate(){
+  const dt=Math.min(clock.getDelta(),.04);
+  const t=performance.now()/1000;
+
+  if(workMode==='going'){
+    const target=myEasel.seatPos;
+    const arrived=moveToward(player,target,3.0,dt);
+    if(arrived){
+      workMode='seated';
+      player.position.set(target.x,.54,target.z);
+      player.rotation.y=myEasel.rot+Math.PI;
+      setAvatarTool(player,'palette');
+      player.userData.mode='painting';
+    }
+  }else if(workMode==='seated'){
+    animatePainting(player,t);
+  }else{
+    const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+    const right=new THREE.Vector3(forward.z,0,-forward.x);
+    const move=new THREE.Vector3();
+    if(keys['w']||keys['arrowup'])move.addScaledVector(forward,-1);
+    if(keys['s']||keys['arrowdown'])move.addScaledVector(forward,1);
+    if(keys['a']||keys['arrowleft'])move.addScaledVector(right,-1);
+    if(keys['d']||keys['arrowright'])move.addScaledVector(right,1);
+    if(move.lengthSq()>0){
+      move.normalize();player.position.addScaledVector(move,3.2*dt);
+      const r=Math.hypot(player.position.x,player.position.z);
+      if(r>8.5){player.position.x*=8.5/r;player.position.z*=8.5/r}
+      player.rotation.y=Math.atan2(move.x,move.z);
+      animateWalk(player,t,1);
+    }else animateIdle(player);
+  }
+
+  npcs.forEach((n,i)=>{
+    n.a+=n.s*dt;n.o.position.set(Math.sin(n.a)*n.r,0,Math.cos(n.a)*n.r);
+    n.o.rotation.y=n.a+(n.s>0?Math.PI/2:-Math.PI/2);
+    animateWalk(n.o,t,.85);
+  });
+
+  const dist=5.8;
+  const camTarget=player.position.clone().add(new THREE.Vector3(0,1.05,0));
+  camera.position.set(
+    player.position.x+Math.sin(yaw)*dist*Math.cos(pitch),
+    player.position.y+2.2+Math.sin(pitch)*dist,
+    player.position.z+Math.cos(yaw)*dist*Math.cos(pitch)
+  );
+  camera.lookAt(camTarget);
+  renderer.render(scene,camera);
+  requestAnimationFrame(animate);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)
+});
+setTimeout(()=>document.getElementById('loading').style.display='none',700);
+</script>
+</body>
+</html>
