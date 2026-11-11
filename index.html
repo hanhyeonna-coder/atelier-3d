@@ -72,6 +72,30 @@
     position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
     background:#2b2019;color:white;font-size:14px
   }
+
+  .controlToggle{
+    position:fixed;right:20px;top:76px;z-index:45;border:0;border-radius:18px;
+    background:rgba(255,248,238,.94);color:#4b3428;padding:10px 14px;font-weight:800;
+    box-shadow:0 10px 28px rgba(0,0,0,.18);cursor:pointer
+  }
+  .controlPanel{
+    position:fixed;right:20px;top:124px;z-index:44;width:320px;max-height:calc(100vh - 155px);
+    overflow:auto;background:rgba(42,30,23,.94);color:white;border:1px solid rgba(255,255,255,.12);
+    border-radius:22px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.28);backdrop-filter:blur(12px)
+  }
+  .controlPanel.hidden{display:none}
+  .controlPanel h3{margin:0 0 4px;font-size:17px}
+  .controlPanel .sub{font-size:11px;color:#cdbeb2;margin-bottom:12px}
+  .controlGroup{border-top:1px solid rgba(255,255,255,.1);padding-top:11px;margin-top:11px}
+  .controlGroup strong{display:block;font-size:12px;margin-bottom:8px;color:#f4dfc8}
+  .controlRow{display:grid;grid-template-columns:108px 1fr 46px;gap:8px;align-items:center;margin:8px 0;font-size:11px}
+  .controlRow input[type=range]{width:100%;accent-color:#d8a05d}
+  .controlRow input[type=color]{width:100%;height:28px;border:0;background:transparent}
+  .controlRow output{text-align:right;color:#e8d7c8;font-variant-numeric:tabular-nums}
+  .panelActions{display:flex;gap:8px;margin-top:13px}
+  .panelActions button{flex:1;border:0;border-radius:12px;padding:9px 10px;font-weight:800;cursor:pointer}
+  .panelActions .reset{background:#eee2d4;color:#4a3529}
+  .panelActions .save{background:#c88a47;color:white}
 </style>
 </head>
 <body>
@@ -86,6 +110,39 @@
 <div class="help">WASD / 방향키로 이동 · 마우스 드래그로 시점 회전 · 이젤 클릭으로 작품 보기</div>
 <div class="legend">베레모 기본 · 스케치 ✏ · 채색 🎨</div>
 <div id="tip" class="tip"></div>
+<button id="controlToggle" class="controlToggle">⚙ 조절</button>
+<aside id="controlPanel" class="controlPanel hidden">
+  <h3>아틀리에 조절 패널</h3>
+  <div class="sub">움직이면 바로 3D 화면에 반영돼요.</div>
+
+  <div class="controlGroup"><strong>아바타</strong>
+    <label class="controlRow"><span>전체 크기</span><input data-key="avatar.scale" type="range" min="0.75" max="1.35" step="0.01"><output></output></label>
+    <label class="controlRow"><span>베레모 X</span><input data-key="avatar.beretX" type="range" min="-0.22" max="0.22" step="0.005"><output></output></label>
+    <label class="controlRow"><span>베레모 Y</span><input data-key="avatar.beretY" type="range" min="1.48" max="1.82" step="0.005"><output></output></label>
+    <label class="controlRow"><span>베레모 Z</span><input data-key="avatar.beretZ" type="range" min="-0.18" max="0.25" step="0.005"><output></output></label>
+    <label class="controlRow"><span>모자 기울기</span><input data-key="avatar.beretTilt" type="range" min="-0.65" max="0.65" step="0.01"><output></output></label>
+    <label class="controlRow"><span>앞치마 색</span><input data-key="avatar.apronColor" type="color"><output></output></label>
+  </div>
+
+  <div class="controlGroup"><strong>걷기</strong>
+    <label class="controlRow"><span>다리 스윙</span><input data-key="avatar.walkingLegSwing" type="range" min="0.15" max="0.9" step="0.01"><output></output></label>
+    <label class="controlRow"><span>팔 스윙</span><input data-key="avatar.walkingArmSwing" type="range" min="0.1" max="0.75" step="0.01"><output></output></label>
+  </div>
+
+  <div class="controlGroup"><strong>이젤</strong>
+    <label class="controlRow"><span>그림 앞뒤</span><input data-key="easel.artZ" type="range" min="-0.08" max="0.18" step="0.005"><output></output></label>
+    <label class="controlRow"><span>프레임 앞뒤</span><input data-key="easel.frameZ" type="range" min="-0.18" max="0.08" step="0.005"><output></output></label>
+    <label class="controlRow"><span>받침대 앞뒤</span><input data-key="easel.supportBarZ" type="range" min="-0.22" max="0.08" step="0.005"><output></output></label>
+  </div>
+
+  <div class="controlGroup"><strong>공간</strong>
+    <label class="controlRow"><span>바닥 직선</span><input data-key="floor.plankLineOpacity" type="range" min="0" max="0.18" step="0.005"><output></output></label>
+    <label class="controlRow"><span>바닥 원형선</span><input data-key="floor.ringLineOpacity" type="range" min="0" max="0.18" step="0.005"><output></output></label>
+    <label class="controlRow"><span>꽃 장식</span><input data-key="flowers.density" type="range" min="0" max="12" step="1"><output></output></label>
+  </div>
+
+  <div class="panelActions"><button id="panelReset" class="reset">기본값</button><button id="panelSave" class="save">내 설정 저장</button></div>
+</aside>
 
 <div id="modal" class="modal">
   <div class="viewer">
@@ -184,9 +241,11 @@ const innerFloor = mesh(
 innerFloor.position.y=.03; scene.add(innerFloor);
 
 /* softer floor lines */
+const floorLineMats=[], ringLineMats=[];
 for(let i=0;i<28;i++){
   const a=i/28*Math.PI*2;
   const mat = new THREE.MeshBasicMaterial({color:0x4b3328,transparent:true,opacity:CONFIG.floor.plankLineOpacity,depthWrite:false});
+  floorLineMats.push(mat);
   const strip=mesh(new THREE.BoxGeometry(.024,.012,8.5),mat,false,false);
   strip.position.set(Math.sin(a)*4.15,.078,Math.cos(a)*4.15);
   strip.rotation.y=a;
@@ -194,6 +253,7 @@ for(let i=0;i<28;i++){
 }
 for(const r of [2.6,5.4,8.2]){
   const mat = new THREE.MeshBasicMaterial({color:0x4b3328,transparent:true,opacity:CONFIG.floor.ringLineOpacity,depthWrite:false});
+  ringLineMats.push(mat);
   const ring=mesh(new THREE.TorusGeometry(r,.022,8,96),mat,false,false);
   ring.rotation.x=Math.PI/2; ring.position.y=.081;scene.add(ring);
 }
@@ -229,19 +289,20 @@ for(let i=0;i<10;i++){
 }
 
 /* flower / vine decoration */
+const flowerObjects=[];
 function addFlowerCluster(x,y,z,scale=1, hue=0){
   const stemMat = new THREE.MeshStandardMaterial({color:0x4d7c48,roughness:.9});
   const leafMat = new THREE.MeshStandardMaterial({color:0x5f9155,roughness:.9});
   const petalColors=[0xf1a5bc,0xe8c3df,0xf6d0dd,0xdca6d8,0xf3b5c0];
-  for(let i=0;i<CONFIG.flowers.density;i++){
+  for(let i=0;i<12;i++){
     const ang=(i/CONFIG.flowers.density)*Math.PI*2;
     const sx=x+Math.cos(ang)*(.18+.08*(i%2))*scale;
     const sz=z+Math.sin(ang)*(.18+.08*(i%2))*scale;
     const stem=mesh(new THREE.CylinderGeometry(.012*scale,.018*scale,.6*scale,7),stemMat,false,false);
     stem.position.set(sx,y-.25*scale,sz);
-    stem.rotation.z=(Math.random()-.5)*.5;scene.add(stem);
+    stem.rotation.z=(Math.random()-.5)*.5;stem.userData.flowerIndex=i;flowerObjects.push(stem);scene.add(stem);
     const leaf=mesh(new THREE.SphereGeometry(.09*scale,10,8),leafMat,false,false);
-    leaf.scale.set(1.6,.5,.8);leaf.position.set(sx+.08*scale,y-.1*scale,sz);scene.add(leaf);
+    leaf.scale.set(1.6,.5,.8);leaf.position.set(sx+.08*scale,y-.1*scale,sz);leaf.userData.flowerIndex=i;flowerObjects.push(leaf);scene.add(leaf);
     const center = new THREE.Group();
     for(let p=0;p<6;p++){
       const a=p/6*Math.PI*2;
@@ -253,7 +314,7 @@ function addFlowerCluster(x,y,z,scale=1, hue=0){
     }
     const core=mesh(new THREE.SphereGeometry(.025*scale,8,6),new THREE.MeshStandardMaterial({color:0xe3ae45}),false,false);
     center.add(core);
-    center.position.set(sx,y+.08*scale,sz);center.rotation.x=Math.PI/2;scene.add(center);
+    center.position.set(sx,y+.08*scale,sz);center.rotation.x=Math.PI/2;center.userData.flowerIndex=i;flowerObjects.push(center);scene.add(center);
   }
 }
 if(CONFIG.flowers.enabled){
@@ -329,6 +390,7 @@ function addEasel(x,z,rot,artIndex,isMine=false){
   const leg2=mesh(new THREE.BoxGeometry(.1,1.8,.1),wood);leg2.position.set(.42,.9,CONFIG.easel.frameZ);leg2.rotation.z=.12;root.add(leg2);
   const back=mesh(new THREE.BoxGeometry(.1,1.65,.1),wood);back.position.set(0,.82,.18);back.rotation.x=-.14;root.add(back);
   const bar=mesh(new THREE.BoxGeometry(1.2,.1,.14),wood);bar.position.set(0,CONFIG.easel.supportBarY,CONFIG.easel.supportBarZ);root.add(bar);
+  root.userData.frameParts=[leg1,leg2]; root.userData.supportBar=bar;
 
   const artGeo=new THREE.PlaneGeometry(1.15,1.0);
   const tex=new THREE.TextureLoader().load(artworks[artIndex].stages[4]);tex.colorSpace=THREE.SRGBColorSpace;
@@ -424,7 +486,7 @@ function buildAvatar(beretColor=0x9b4c43,tool='palette'){
   const toolObj = tool==='pencil'?createPencil():createPalette();
   toolObj.position.set(.02,-.46,.02);toolObj.scale.setScalar(tool==='pencil'?1.0:1.0);armR.add(toolObj);
 
-  g.userData={tool,legL,legR,armL,armR,beret,toolObj,mode:'idle',phase:Math.random()*10};
+  g.userData={tool,legL,legR,armL,armR,beret,apron,toolObj,mode:'idle',phase:Math.random()*10};
   return g;
 }
 function setAvatarTool(av,tool){
@@ -535,6 +597,74 @@ setInterval(()=>{
   const h=String(Math.floor(sec/3600)).padStart(2,'0'),m=String(Math.floor((sec%3600)/60)).padStart(2,'0'),s=String(sec%60).padStart(2,'0');
   document.getElementById('clock').textContent=`${h}:${m}:${s}`;
 },1000);
+
+
+/* ---------- live control panel ---------- */
+const DEFAULT_CONFIG=JSON.parse(JSON.stringify(CONFIG));
+const controlPanel=document.getElementById('controlPanel');
+document.getElementById('controlToggle').onclick=()=>controlPanel.classList.toggle('hidden');
+
+function getCfg(path){
+  const [a,b]=path.split('.');
+  return CONFIG[a][b];
+}
+function setCfg(path,val){
+  const [a,b]=path.split('.');
+  CONFIG[a][b]=val;
+}
+function colorNumToHex(n){ return '#'+Number(n).toString(16).padStart(6,'0'); }
+function applyLiveConfig(){
+  const avatars=[player,...npcs.map(n=>n.o)];
+  avatars.forEach(av=>{
+    av.scale.setScalar(CONFIG.avatar.scale);
+    if(av.userData.beret){
+      av.userData.beret.position.set(CONFIG.avatar.beretX,CONFIG.avatar.beretY,CONFIG.avatar.beretZ);
+      av.userData.beret.rotation.z=CONFIG.avatar.beretTilt;
+    }
+    if(av.userData.apron) av.userData.apron.material.color.set(CONFIG.avatar.apronColor);
+  });
+  easelData.forEach(e=>{
+    e.art.position.z=CONFIG.easel.artZ;
+    (e.root.userData.frameParts||[]).forEach(p=>p.position.z=CONFIG.easel.frameZ);
+    if(e.root.userData.supportBar) e.root.userData.supportBar.position.z=CONFIG.easel.supportBarZ;
+  });
+  floorLineMats.forEach(m=>m.opacity=CONFIG.floor.plankLineOpacity);
+  ringLineMats.forEach(m=>m.opacity=CONFIG.floor.ringLineOpacity);
+  flowerObjects.forEach(o=>o.visible=(o.userData.flowerIndex < CONFIG.flowers.density));
+}
+function syncControls(){
+  document.querySelectorAll('[data-key]').forEach(inp=>{
+    const key=inp.dataset.key, val=getCfg(key);
+    if(inp.type==='color') inp.value=colorNumToHex(val);
+    else inp.value=val;
+    const out=inp.parentElement.querySelector('output');
+    if(out) out.value=inp.type==='color'?inp.value:(Number(val).toFixed(inp.step && inp.step.includes('.') ? 2 : 0));
+  });
+}
+document.querySelectorAll('[data-key]').forEach(inp=>{
+  inp.addEventListener('input',()=>{
+    const key=inp.dataset.key;
+    const v=inp.type==='color'?parseInt(inp.value.slice(1),16):Number(inp.value);
+    setCfg(key,v);
+    const out=inp.parentElement.querySelector('output');
+    if(out) out.value=inp.type==='color'?inp.value:(Number(v).toFixed(inp.step && inp.step.includes('.') ? 2 : 0));
+    applyLiveConfig();
+  });
+});
+document.getElementById('panelReset').onclick=()=>{
+  Object.keys(DEFAULT_CONFIG).forEach(k=>Object.assign(CONFIG[k],DEFAULT_CONFIG[k]));
+  localStorage.removeItem('atelier3d-config');
+  syncControls();applyLiveConfig();
+};
+document.getElementById('panelSave').onclick=()=>{
+  localStorage.setItem('atelier3d-config',JSON.stringify(CONFIG));
+  const b=document.getElementById('panelSave'); const old=b.textContent;b.textContent='저장됨 ✓';setTimeout(()=>b.textContent=old,900);
+};
+try{
+  const saved=JSON.parse(localStorage.getItem('atelier3d-config')||'null');
+  if(saved) Object.keys(saved).forEach(k=>CONFIG[k]&&Object.assign(CONFIG[k],saved[k]));
+}catch(e){}
+syncControls();applyLiveConfig();
 
 /* ---------- main loop ---------- */
 const clock=new THREE.Clock();
