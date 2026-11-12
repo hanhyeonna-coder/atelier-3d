@@ -172,10 +172,53 @@ nub=cyl("AV Beret Nub",.024,.075,(0,.02,1.82),BERET,verts=16)
 bone_parent(nub,"head")
 
 # arms
+# Build with intentional overlap at shoulder / elbow so the limb reads as one connected arm.
 for side,x in (("L",-1),("R",1)):
-    bone_parent(cyl(f"AV UpperArm {side}",.065,.32,(.28*x,0,1.08),SHIRT,rot=(0,0,math.radians(66*x))),f"upper_arm.{side}")
-    bone_parent(cyl(f"AV Forearm {side}",.058,.30,(.55*x,0,.94),SKIN,rot=(0,0,math.radians(52*x))),f"forearm.{side}")
-    bone_parent(sph(f"AV Hand {side}",(.075,.06,.075),(.70*x,0,.82),SKIN),f"hand.{side}")
+    upper = cyl(
+        f"AV UpperArm {side}",
+        .075,
+        .40,
+        (.255*x,-.005,1.075),
+        SHIRT,
+        rot=(0,0,math.radians(58*x))
+    )
+    bone_parent(upper,f"upper_arm.{side}")
+
+    fore = cyl(
+        f"AV Forearm {side}",
+        .066,
+        .38,
+        (.515*x,-.005,.925),
+        SKIN,
+        rot=(0,0,math.radians(49*x))
+    )
+    bone_parent(fore,f"forearm.{side}")
+
+    hand = sph(
+        f"AV Hand {side}",
+        (.082,.068,.085),
+        (.675*x,-.005,.805),
+        SKIN
+    )
+    bone_parent(hand,f"hand.{side}")
+
+    # round shoulder cap closes the visual gap between torso and upper arm
+    shoulder = sph(
+        f"AV Shoulder {side}",
+        (.105,.095,.11),
+        (.205*x,0,1.135),
+        SHIRT
+    )
+    bone_parent(shoulder,f"upper_arm.{side}")
+
+    # elbow cap prevents a visible break when the arm bends
+    elbow = sph(
+        f"AV Elbow {side}",
+        (.073,.065,.073),
+        (.405*x,-.005,.995),
+        SKIN
+    )
+    bone_parent(elbow,f"forearm.{side}")
 
 # legs
 for side,x in (("L",-1),("R",1)):
