@@ -141,9 +141,12 @@ rig.show_in_front=True
 # rigid-part parenting helpers
 # ------------------------------------------------------------
 def bone_parent(obj,bone_name):
-    obj.parent=rig
-    obj.parent_type='BONE'
-    obj.parent_bone=bone_name
+    # Preserve the object's current world-space transform while bone-parenting.
+    world_matrix = obj.matrix_world.copy()
+    obj.parent = rig
+    obj.parent_type = 'BONE'
+    obj.parent_bone = bone_name
+    obj.matrix_world = world_matrix
     return obj
 
 # torso
