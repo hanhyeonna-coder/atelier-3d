@@ -141,12 +141,24 @@ rig.show_in_front=True
 # rigid-part parenting helpers
 # ------------------------------------------------------------
 def bone_parent(obj,bone_name):
-    # Preserve the object's current world-space transform while bone-parenting.
-    world_matrix = obj.matrix_world.copy()
-    obj.parent = rig
-    obj.parent_type = 'BONE'
-    obj.parent_bone = bone_name
-    obj.matrix_world = world_matrix
+    # Rigid-skin this mesh to exactly one bone.
+    # This is much more stable than direct bone parenting for articulated parts.
+    if obj.type != 'MESH':
+        return obj
+
+    vg = obj.vertex_groups.get(bone_name)
+    if vg is None:
+        vg = obj.vertex_groups.new(name=bone_name)
+
+    indices = [v.index for v in obj.data.vertices]
+    if indices:
+        vg.add(indices, 1.0, 'REPLACE')
+
+    mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+    mod.object = rig
+    mod.use_vertex_groups = True
+    mod.use_bone_envelopes = False
+
     return obj
 
 # torso
@@ -377,7 +389,7 @@ bpy.context.scene.frame_end=40
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # place avatar near origin but slightly forward so it is easy to inspect
-rig.location=(0,-2.2,0)
+rig.location=(0,0,0)
 
 for o in COLL.objects:
     o["generated_by"]="atelier_avatar_v1"
