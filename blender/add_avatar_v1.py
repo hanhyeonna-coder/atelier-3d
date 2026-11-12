@@ -320,13 +320,8 @@ key("head",1,rot=(math.radians(-5),0,0))
 key("head",16,rot=(math.radians(-8),math.radians(4),0))
 key("head",32,rot=(math.radians(-5),0,0))
 
-# Make animation curves linear/bezier-friendly
-for act_name in ("Avatar_Idle","Avatar_Walk","Avatar_Sit","Avatar_Paint"):
-    act=bpy.data.actions.get(act_name)
-    if act:
-        for fc in act.fcurves:
-            for kp in fc.keyframe_points:
-                kp.interpolation='BEZIER'
+# Blender version-safe: keep default keyframe interpolation.
+# (Direct Action.fcurves access is unavailable in some Blender versions.)
 
 # default to Idle
 rig.animation_data.action=bpy.data.actions.get("Avatar_Idle")
