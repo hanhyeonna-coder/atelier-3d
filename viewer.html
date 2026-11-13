@@ -98,9 +98,29 @@ function fitEnvironment(root){
 function play(name,fade=.18){
   const next=actions[name];
   if(!next){status.textContent='액션 없음: '+name;return;}
-  if(current===next)return;
-  next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).play();
-  if(current) current.crossFadeTo(next,fade,false);
+  if(current===next){
+    if(!next.isRunning()) next.reset().play();
+    return;
+  }
+
+  next.reset();
+  next.enabled=true;
+  next.clampWhenFinished=false;
+
+  // Idle, Walk and Paint are continuous loops.
+  if(name==='Avatar_Idle' || name==='Avatar_Walk' || name==='Avatar_Paint'){
+    next.setLoop(THREE.LoopRepeat, Infinity);
+    next.repetitions=Infinity;
+  } else {
+    next.setLoop(THREE.LoopRepeat, Infinity);
+  }
+
+  next.setEffectiveTimeScale(1).setEffectiveWeight(1).play();
+
+  if(current && current!==next){
+    current.crossFadeTo(next,fade,false);
+  }
+
   current=next;
   status.textContent=name;
 }
@@ -150,20 +170,19 @@ function updatePlayer(dt){
     next.z*=s;
   }
 
+  const oldPosition=avatar.position.clone();
   avatar.position.copy(next);
 
-  // glTF avatar forward axis correction: face actual travel direction.
+  // Face the actual direction of travel.
   avatar.rotation.y=Math.atan2(move.x,move.z);
 
   play('Avatar_Walk');
 
-  const followTarget=new THREE.Vector3(avatar.position.x,avatar.position.y+1.15,avatar.position.z);
-  controls.target.lerp(followTarget,.12);
-
-  // Y-up third-person camera: behind and above the avatar.
-  const desiredOffset=new THREE.Vector3(0,2.2,-5.8).applyAxisAngle(new THREE.Vector3(0,1,0),avatar.rotation.y);
-  const desiredCamera=avatar.position.clone().add(desiredOffset);
-  camera.position.lerp(desiredCamera,.06);
+  // Follow by TRANSLATING the camera, never auto-rotating it.
+  // The view direction changes only when the user drags the mouse.
+  const delta=avatar.position.clone().sub(oldPosition);
+  camera.position.add(delta);
+  controls.target.add(delta);
 }
 
 Promise.all([
