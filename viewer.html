@@ -51,7 +51,7 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xdceaf2);
 
 const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.05,300);
-camera.position.set(12,-14,8);
+camera.position.set(0,-7.5,3.2);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -68,7 +68,7 @@ const sun=new THREE.DirectionalLight(0xfff0d4,3.1);
 sun.position.set(-12,-8,18);sun.castShadow=true;scene.add(sun);
 
 const controls=new OrbitControls(camera,renderer.domElement);
-controls.target.set(0,0,1.7);
+controls.target.set(0,0,1.25);
 controls.enableDamping=true;
 controls.maxPolarAngle=Math.PI*.49;
 
@@ -76,6 +76,7 @@ const loader=new GLTFLoader();
 const clock=new THREE.Clock();
 
 let environment=null;
+let furniture=null;
 let avatar=null;
 let mixer=null;
 let actions={};
@@ -113,28 +114,70 @@ addEventListener('keyup',e=>keys.delete(e.code));
 
 function updatePlayer(dt){
   if(!avatar)return;
-  const forward=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
-  const side=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
-  if(!forward&&!side){
+
+  const forwardInput=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
+  const sideInput=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
+
+  if(!forwardInput&&!sideInput){
     if(current===actions['Avatar_Walk']) play('Avatar_Idle');
     return;
   }
-  const angle=Math.atan2(side,forward);
-  avatar.rotation.y=angle;
+
+  // Movement is relative to the current camera view, projected onto the floor.
+  const camForward=new THREE.Vector3();
+  camera.getWorldDirection(camForward);
+  camForward.y=0;
+  camForward.normalize();
+
+  const camRight=new THREE.Vector3().crossVectors(camForward,new THREE.Vector3(0,1,0)).normalize();
+
+  const move=new THREE.Vector3()
+    .addScaledVector(camForward,forwardInput)
+    .addScaledVector(camRight,sideInput);
+
+  if(move.lengthSq()>0) move.normalize();
+
   const speed=2.0;
-  avatar.position.x+=Math.sin(angle)*speed*dt;
-  avatar.position.z+=Math.cos(angle)*speed*dt;
+  const next=avatar.position.clone().addScaledVector(move,speed*dt);
+
+  // Keep the player inside the circular atelier floor.
+  const FLOOR_RADIUS=5.3;
+  const radial=Math.hypot(next.x,next.z);
+  if(radial>FLOOR_RADIUS){
+    const s=FLOOR_RADIUS/radial;
+    next.x*=s;
+    next.z*=s;
+  }
+
+  avatar.position.copy(next);
+
+  // glTF avatar forward axis correction: face actual travel direction.
+  avatar.rotation.y=Math.atan2(move.x,move.z);
+
   play('Avatar_Walk');
-  controls.target.lerp(new THREE.Vector3(avatar.position.x,avatar.position.y+1.1,avatar.position.z),.05);
+
+  const followTarget=new THREE.Vector3(avatar.position.x,avatar.position.y+1.15,avatar.position.z);
+  controls.target.lerp(followTarget,.12);
+
+  // Keep camera in a comfortable interior third-person distance.
+  const desiredOffset=new THREE.Vector3(0,-6.2,2.2).applyAxisAngle(new THREE.Vector3(0,1,0),avatar.rotation.y);
+  const desiredCamera=avatar.position.clone().add(desiredOffset);
+  camera.position.lerp(desiredCamera,.06);
 }
 
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
-  loadGLB('./models/avatar_01.glb')
-]).then(([envGLB,avGLB])=>{
+  loadGLB('./models/avatar_01.glb'),
+  loadGLB('./models/atelier_furniture.glb').catch(()=>null)
+]).then(([envGLB,avGLB,furnitureGLB])=>{
   environment=envGLB.scene;
 fitEnvironment(environment);
   scene.add(environment);
+
+  if(furnitureGLB){
+    furniture=furnitureGLB.scene;
+    scene.add(furniture);
+  }
 
   // play only the boat animation from the environment file
   if(envGLB.animations?.length){
@@ -144,7 +187,7 @@ fitEnvironment(environment);
   }
 
   avatar=avGLB.scene;
-  avatar.position.set(0,0,2.5);
+  avatar.position.set(0,-2.6,0);
   scene.add(avatar);
 
   mixer=new THREE.AnimationMixer(avatar);
