@@ -158,45 +158,143 @@ function normalizeAvatarOrigin(model){
 function enhanceMaterials(root){
   root.traverse(o=>{
     if(!o.isMesh)return;
+
+    const objectName=(o.name||'').toLowerCase();
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+
     o.castShadow=true;
     o.receiveShadow=true;
 
-    const mats=Array.isArray(o.material)?o.material:[o.material];
     mats.filter(Boolean).forEach(mat=>{
-      const label=((mat.name||'')+' '+(o.name||'')).toLowerCase();
-      if(label.includes('glass')||label.includes('dome')){
+      const materialName=(mat.name||'').toLowerCase();
+      const label=objectName+' '+materialName;
+
+      const isGlass =
+        label.includes('glass') ||
+        label.includes('dome');
+
+      const isWater =
+        label.includes('water') ||
+        label.includes('lake') ||
+        label.includes('river');
+
+      const isCanvas =
+        label.includes('canvas') ||
+        label.includes('painting') ||
+        label.includes('picture') ||
+        label.includes('artwork') ||
+        label.includes('board');
+
+      const isWood =
+        label.includes('wood') ||
+        label.includes('pillar') ||
+        label.includes('column') ||
+        label.includes('beam') ||
+        label.includes('post') ||
+        label.includes('frame') ||
+        label.includes('roof beam');
+
+      // --- GLASS / DOME ---
+      if(isGlass){
         mat.transparent=true;
-        mat.opacity=Math.min(mat.opacity ?? 1,.28);
-        mat.roughness=.09;
-        mat.metalness=0;
-        if('transmission' in mat)mat.transmission=.68;
-        if('thickness' in mat)mat.thickness=.08;
-        if('ior' in mat)mat.ior=1.45;
-        if('envMapIntensity' in mat)mat.envMapIntensity=1.05;
-        mat.side=THREE.DoubleSide;
+        mat.opacity=0.24;
         mat.depthWrite=false;
+        mat.depthTest=true;
+        mat.side=THREE.DoubleSide;
+
+        if('color' in mat) mat.color.set('#eef8ff');
+        if('roughness' in mat) mat.roughness=0.10;
+        if('metalness' in mat) mat.metalness=0.0;
+        if('transmission' in mat) mat.transmission=0.92;
+        if('thickness' in mat) mat.thickness=0.28;
+        if('ior' in mat) mat.ior=1.45;
+        if('clearcoat' in mat) mat.clearcoat=1.0;
+        if('clearcoatRoughness' in mat) mat.clearcoatRoughness=0.08;
+        if('envMapIntensity' in mat) mat.envMapIntensity=1.35;
+
+        o.castShadow=false;
+        o.receiveShadow=false;
         mat.needsUpdate=true;
-      }else{
-        const isArtwork =
-          label.includes('canvas') ||
-          label.includes('painting') ||
-          label.includes('picture') ||
-          label.includes('artwork') ||
-          label.includes('easel');
+        return;
+      }
 
-        if(isArtwork){
-          mat.transparent=false;
-          mat.opacity=1;
-          mat.depthWrite=true;
-          mat.depthTest=true;
-          if('alphaTest' in mat) mat.alphaTest=0;
-          mat.side=THREE.DoubleSide;
-          mat.needsUpdate=true;
+      // --- WATER ---
+      if(isWater){
+        mat.transparent=true;
+        mat.opacity=0.92;
+        mat.depthWrite=true;
+        mat.depthTest=true;
+        mat.side=THREE.DoubleSide;
+
+        if('color' in mat) mat.color.set('#6faec7');
+        if('roughness' in mat) mat.roughness=0.18;
+        if('metalness' in mat) mat.metalness=0.02;
+        if('transmission' in mat) mat.transmission=0.10;
+        if('clearcoat' in mat) mat.clearcoat=0.75;
+        if('clearcoatRoughness' in mat) mat.clearcoatRoughness=0.16;
+        if('envMapIntensity' in mat) mat.envMapIntensity=1.25;
+
+        // If Blender exported a normal map, animate it subtly.
+        if(mat.normalMap){
+          mat.normalMap.wrapS=THREE.RepeatWrapping;
+          mat.normalMap.wrapT=THREE.RepeatWrapping;
+          mat.normalMap.repeat.set(3,3);
+          o.userData.waterMaterial=mat;
         }
 
-        if('envMapIntensity' in mat){
-          mat.envMapIntensity=Math.max(mat.envMapIntensity||0,.3);
-        }
+        o.castShadow=false;
+        o.receiveShadow=true;
+        mat.needsUpdate=true;
+        return;
+      }
+
+      // --- CANVAS / PAINTING SURFACE ---
+      if(isCanvas){
+        mat.transparent=false;
+        mat.opacity=1;
+        mat.depthWrite=true;
+        mat.depthTest=true;
+        mat.side=THREE.DoubleSide;
+        mat.alphaTest=0;
+
+        if('color' in mat) mat.color.set('#f6f3eb');
+        if('roughness' in mat) mat.roughness=0.92;
+        if('metalness' in mat) mat.metalness=0;
+
+        // Reduce z-fighting / rear-stick bleed on the white canvas.
+        mat.polygonOffset=true;
+        mat.polygonOffsetFactor=-2;
+        mat.polygonOffsetUnits=-2;
+
+        o.receiveShadow=false;
+        o.renderOrder=5;
+        mat.needsUpdate=true;
+        return;
+      }
+
+      // --- WOOD / STRUCTURE ---
+      if(isWood){
+        mat.transparent=false;
+        mat.opacity=1;
+        mat.depthWrite=true;
+        mat.depthTest=true;
+        mat.alphaTest=0;
+        mat.side=THREE.FrontSide;
+
+        if('transmission' in mat) mat.transmission=0;
+        if('roughness' in mat) mat.roughness=Math.max(mat.roughness ?? 0.45,0.42);
+        if('metalness' in mat) mat.metalness=0;
+        if('envMapIntensity' in mat) mat.envMapIntensity=0.35;
+
+        o.castShadow=true;
+        o.receiveShadow=true;
+        mat.needsUpdate=true;
+        return;
+      }
+
+      // Default opaque objects.
+      if('envMapIntensity' in mat){
+        mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.28);
       }
     });
   });
@@ -525,6 +623,15 @@ function tick(){
   if(avatarMixer)avatarMixer.update(dt);
   if(envMixer)envMixer.update(dt);
   if(boatMixer)boatMixer.update(dt);
+
+  // Subtle water movement when a normal map exists.
+  scene.traverse(o=>{
+    const waterMaterial=o.userData?.waterMaterial;
+    if(waterMaterial?.normalMap){
+      waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.012)%1;
+      waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.007)%1;
+    }
+  });
 
   updateMovement(dt);
   updateCamera();
