@@ -42,6 +42,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#d9e6ef;font-family:-a
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 
 const app=document.getElementById('app');
 const loading=document.getElementById('loading');
@@ -60,22 +61,40 @@ renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.05;
+renderer.toneMappingExposure=1.12;
+
+const pmrem=new THREE.PMREMGenerator(renderer);
+scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
 app.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff,0x6d625c,2.3));
-const sun=new THREE.DirectionalLight(0xfff0d4,3.1);
-sun.position.set(-12,-8,18);sun.castShadow=true;scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xfff7ed,0x73879a,1.65));
+
+const sun=new THREE.DirectionalLight(0xffddb0,4.2);
+sun.position.set(-8,11,-4);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.near=0.5;
+sun.shadow.camera.far=40;
+sun.shadow.camera.left=-10;
+sun.shadow.camera.right=10;
+sun.shadow.camera.top=10;
+sun.shadow.camera.bottom=-10;
+sun.shadow.bias=-0.00035;
+scene.add(sun);
+
+const softFill=new THREE.DirectionalLight(0xbfdcff,1.0);
+softFill.position.set(7,5,6);
+scene.add(softFill);
 
 const controls=new OrbitControls(camera,renderer.domElement);
 controls.target.set(0,1.15,0);
 controls.enableDamping=true;
 controls.enablePan=false;
 controls.enableZoom=true;
-controls.minDistance=2.8;
-controls.maxDistance=10.0;
-controls.minPolarAngle=0.65;
-controls.maxPolarAngle=1.48;
+controls.minDistance=2.4;
+controls.maxDistance=5.2;
+controls.minPolarAngle=0.72;
+controls.maxPolarAngle=1.42;
 
 const loader=new GLTFLoader();
 const clock=new THREE.Clock();
@@ -83,6 +102,7 @@ const clock=new THREE.Clock();
 let environment=null;
 let furniture=null;
 let interiorDecor=null;
+let boatScene=null;
 let avatar=null;
 let mixer=null;
 let actions={};
@@ -104,6 +124,58 @@ function fitEnvironment(root){
   const center=box.getCenter(new THREE.Vector3());
   // Blender pavilion is authored around world origin; only correct obvious export offsets.
   if(center.length()>50) root.position.sub(center);
+}
+
+function enhanceSceneMaterials(root){
+  root.traverse(o=>{
+    if(!o.isMesh)return;
+
+    o.castShadow=true;
+    o.receiveShadow=true;
+
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    mats.filter(Boolean).forEach(mat=>{
+      const label=((mat.name||'')+' '+(o.name||'')).toLowerCase();
+
+      // Restore the glass-dome feeling that Blender viewport had.
+      if(label.includes('glass') || label.includes('dome')){
+        mat.transparent=true;
+        mat.opacity=Math.min(mat.opacity ?? 1,0.26);
+        mat.roughness=0.08;
+        mat.metalness=0.0;
+        if('transmission' in mat) mat.transmission=0.72;
+        if('thickness' in mat) mat.thickness=0.08;
+        if('ior' in mat) mat.ior=1.45;
+        mat.envMapIntensity=1.8;
+        mat.side=THREE.DoubleSide;
+        mat.depthWrite=false;
+        mat.needsUpdate=true;
+      }else{
+        if('envMapIntensity' in mat) mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.65);
+      }
+    });
+  });
+}
+
+function clampCameraInside(){
+  // Never allow the camera to leave the pavilion interior.
+  const CAMERA_RADIUS=4.75;
+  const r=Math.hypot(camera.position.x,camera.position.z);
+  if(r>CAMERA_RADIUS){
+    const s=CAMERA_RADIUS/r;
+    camera.position.x*=s;
+    camera.position.z*=s;
+  }
+  camera.position.y=THREE.MathUtils.clamp(camera.position.y,1.25,4.6);
+
+  const TARGET_RADIUS=4.55;
+  const tr=Math.hypot(controls.target.x,controls.target.z);
+  if(tr>TARGET_RADIUS){
+    const s=TARGET_RADIUS/tr;
+    controls.target.x*=s;
+    controls.target.z*=s;
+  }
+  controls.target.y=THREE.MathUtils.clamp(controls.target.y,0.8,2.1);
 }
 
 function play(name,fade=.18){
@@ -144,19 +216,24 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 
+let pointerDragged=false;
+
 renderer.domElement.addEventListener('pointerdown',e=>{
   pointerDownX=e.clientX;
   pointerDownY=e.clientY;
-  pointerDownTime=performance.now();
+  pointerDragged=false;
 });
 
-renderer.domElement.addEventListener('pointerup',e=>{
-  const moved=Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY);
-  const elapsed=performance.now()-pointerDownTime;
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(e.buttons){
+    if(Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>6){
+      pointerDragged=true;
+    }
+  }
+});
 
-  // A short, nearly stationary pointer gesture is a floor click.
-  // Dragging remains OrbitControls camera rotation.
-  if(moved>7 || elapsed>500 || !avatar) return;
+renderer.domElement.addEventListener('click',e=>{
+  if(pointerDragged || !avatar) return;
 
   const rect=renderer.domElement.getBoundingClientRect();
   pointerNdc.x=((e.clientX-rect.left)/rect.width)*2-1;
@@ -164,10 +241,10 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
   raycaster.setFromCamera(pointerNdc,camera);
   const hit=new THREE.Vector3();
+
   if(!raycaster.ray.intersectPlane(floorPlane,hit)) return;
 
-  // Clamp clicked target to the usable circular atelier floor.
-  const FLOOR_RADIUS=5.15;
+  const FLOOR_RADIUS=4.65;
   const radial=Math.hypot(hit.x,hit.z);
   if(radial>FLOOR_RADIUS){
     const s=FLOOR_RADIUS/radial;
@@ -177,6 +254,7 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
   hit.y=avatar.position.y;
   clickTarget=hit.clone();
+  status.textContent='이동 중';
 });
 
 function updatePlayer(dt){
@@ -235,7 +313,7 @@ function updatePlayer(dt){
 
   const next=avatar.position.clone().addScaledVector(move,step);
 
-  const FLOOR_RADIUS=5.15;
+  const FLOOR_RADIUS=4.65;
   const radial=Math.hypot(next.x,next.z);
   if(radial>FLOOR_RADIUS){
     const s=FLOOR_RADIUS/radial;
@@ -246,7 +324,7 @@ function updatePlayer(dt){
   avatar.position.copy(next);
 
   // Face actual movement direction.
-  avatar.rotation.y=Math.atan2(move.x,move.z);
+  avatar.rotation.y=Math.atan2(move.x,move.z)+Math.PI;
   play('Avatar_Walk');
 
   // Camera follows only by translation; it never auto-rotates.
@@ -259,19 +337,23 @@ Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null)
-]).then(([envGLB,avGLB,furnitureGLB,interiorDecorGLB])=>{
+  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
+  loadGLB('./models/atelier_boat.glb').catch(()=>null)
+]).then(([envGLB,avGLB,furnitureGLB,interiorDecorGLB,boatGLB])=>{
   environment=envGLB.scene;
 fitEnvironment(environment);
+  enhanceSceneMaterials(environment);
   scene.add(environment);
 
   if(furnitureGLB){
     furniture=furnitureGLB.scene;
+    enhanceSceneMaterials(furniture);
     scene.add(furniture);
   }
 
   if(interiorDecorGLB){
     interiorDecor=interiorDecorGLB.scene;
+    enhanceSceneMaterials(interiorDecor);
     scene.add(interiorDecor);
   }
 
@@ -290,6 +372,7 @@ fitEnvironment(environment);
 
   avatar=avGLB.scene;
   avatar.position.set(0,0,-2.6);
+  enhanceSceneMaterials(avatar);
   scene.add(avatar);
 
   mixer=new THREE.AnimationMixer(avatar);
@@ -313,8 +396,10 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
   if(mixer)mixer.update(dt);
   if(scene.userData.envMixer)scene.userData.envMixer.update(dt);
+  if(scene.userData.boatMixer)scene.userData.boatMixer.update(dt);
   updatePlayer(dt);
   controls.update();
+  clampCameraInside();
   renderer.render(scene,camera);
 }
 tick();
