@@ -51,7 +51,7 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xdceaf2);
 
 const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.05,300);
-camera.position.set(0,-7.5,3.2);
+camera.position.set(0,2.2,-6.5);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -68,7 +68,7 @@ const sun=new THREE.DirectionalLight(0xfff0d4,3.1);
 sun.position.set(-12,-8,18);sun.castShadow=true;scene.add(sun);
 
 const controls=new OrbitControls(camera,renderer.domElement);
-controls.target.set(0,0,1.25);
+controls.target.set(0,1.15,0);
 controls.enableDamping=true;
 controls.maxPolarAngle=Math.PI*.49;
 
@@ -77,6 +77,7 @@ const clock=new THREE.Clock();
 
 let environment=null;
 let furniture=null;
+let interiorDecor=null;
 let avatar=null;
 let mixer=null;
 let actions={};
@@ -159,8 +160,8 @@ function updatePlayer(dt){
   const followTarget=new THREE.Vector3(avatar.position.x,avatar.position.y+1.15,avatar.position.z);
   controls.target.lerp(followTarget,.12);
 
-  // Keep camera in a comfortable interior third-person distance.
-  const desiredOffset=new THREE.Vector3(0,-6.2,2.2).applyAxisAngle(new THREE.Vector3(0,1,0),avatar.rotation.y);
+  // Y-up third-person camera: behind and above the avatar.
+  const desiredOffset=new THREE.Vector3(0,2.2,-5.8).applyAxisAngle(new THREE.Vector3(0,1,0),avatar.rotation.y);
   const desiredCamera=avatar.position.clone().add(desiredOffset);
   camera.position.lerp(desiredCamera,.06);
 }
@@ -168,8 +169,9 @@ function updatePlayer(dt){
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
-  loadGLB('./models/atelier_furniture.glb').catch(()=>null)
-]).then(([envGLB,avGLB,furnitureGLB])=>{
+  loadGLB('./models/atelier_furniture.glb').catch(()=>null),
+  loadGLB('./models/atelier_interior_decor.glb').catch(()=>null)
+]).then(([envGLB,avGLB,furnitureGLB,interiorDecorGLB])=>{
   environment=envGLB.scene;
 fitEnvironment(environment);
   scene.add(environment);
@@ -177,6 +179,11 @@ fitEnvironment(environment);
   if(furnitureGLB){
     furniture=furnitureGLB.scene;
     scene.add(furniture);
+  }
+
+  if(interiorDecorGLB){
+    interiorDecor=interiorDecorGLB.scene;
+    scene.add(interiorDecor);
   }
 
   // play only the boat animation from the environment file
@@ -187,7 +194,7 @@ fitEnvironment(environment);
   }
 
   avatar=avGLB.scene;
-  avatar.position.set(0,-2.6,0);
+  avatar.position.set(0,0,-2.6);
   scene.add(avatar);
 
   mixer=new THREE.AnimationMixer(avatar);
