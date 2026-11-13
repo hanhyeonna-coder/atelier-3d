@@ -61,15 +61,16 @@ renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.12;
+renderer.toneMappingExposure=0.92;
 
 const pmrem=new THREE.PMREMGenerator(renderer);
 scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
+scene.environmentIntensity=0.42;
 app.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xfff7ed,0x73879a,1.65));
+scene.add(new THREE.HemisphereLight(0xfff7ed,0x73879a,0.95));
 
-const sun=new THREE.DirectionalLight(0xffddb0,4.2);
+const sun=new THREE.DirectionalLight(0xffddb0,2.35);
 sun.position.set(-8,11,-4);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
@@ -82,7 +83,7 @@ sun.shadow.camera.bottom=-10;
 sun.shadow.bias=-0.00035;
 scene.add(sun);
 
-const softFill=new THREE.DirectionalLight(0xbfdcff,1.0);
+const softFill=new THREE.DirectionalLight(0xbfdcff,0.45);
 softFill.position.set(7,5,6);
 scene.add(softFill);
 
@@ -146,12 +147,12 @@ function enhanceSceneMaterials(root){
         if('transmission' in mat) mat.transmission=0.72;
         if('thickness' in mat) mat.thickness=0.08;
         if('ior' in mat) mat.ior=1.45;
-        mat.envMapIntensity=1.8;
+        mat.envMapIntensity=1.15;
         mat.side=THREE.DoubleSide;
         mat.depthWrite=false;
         mat.needsUpdate=true;
       }else{
-        if('envMapIntensity' in mat) mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.65);
+        if('envMapIntensity' in mat) mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.35);
       }
     });
   });
@@ -159,7 +160,7 @@ function enhanceSceneMaterials(root){
 
 function clampCameraInside(){
   // Never allow the camera to leave the pavilion interior.
-  const CAMERA_RADIUS=4.75;
+  const CAMERA_RADIUS=4.35;
   const r=Math.hypot(camera.position.x,camera.position.z);
   if(r>CAMERA_RADIUS){
     const s=CAMERA_RADIUS/r;
@@ -168,7 +169,7 @@ function clampCameraInside(){
   }
   camera.position.y=THREE.MathUtils.clamp(camera.position.y,1.25,4.6);
 
-  const TARGET_RADIUS=4.55;
+  const TARGET_RADIUS=4.25;
   const tr=Math.hypot(controls.target.x,controls.target.z);
   if(tr>TARGET_RADIUS){
     const s=TARGET_RADIUS/tr;
@@ -225,14 +226,12 @@ renderer.domElement.addEventListener('pointerdown',e=>{
 });
 
 renderer.domElement.addEventListener('pointermove',e=>{
-  if(e.buttons){
-    if(Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>6){
-      pointerDragged=true;
-    }
+  if(e.buttons && Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>6){
+    pointerDragged=true;
   }
 });
 
-renderer.domElement.addEventListener('click',e=>{
+renderer.domElement.addEventListener('pointerup',e=>{
   if(pointerDragged || !avatar) return;
 
   const rect=renderer.domElement.getBoundingClientRect();
@@ -241,10 +240,10 @@ renderer.domElement.addEventListener('click',e=>{
 
   raycaster.setFromCamera(pointerNdc,camera);
   const hit=new THREE.Vector3();
+  const ok=raycaster.ray.intersectPlane(floorPlane,hit);
+  if(!ok) return;
 
-  if(!raycaster.ray.intersectPlane(floorPlane,hit)) return;
-
-  const FLOOR_RADIUS=4.65;
+  const FLOOR_RADIUS=4.55;
   const radial=Math.hypot(hit.x,hit.z);
   if(radial>FLOOR_RADIUS){
     const s=FLOOR_RADIUS/radial;
@@ -324,13 +323,21 @@ function updatePlayer(dt){
   avatar.position.copy(next);
 
   // Face actual movement direction.
-  avatar.rotation.y=Math.atan2(move.x,move.z)+Math.PI;
+  avatar.rotation.y=Math.atan2(move.x,move.z);
   play('Avatar_Walk');
 
-  // Camera follows only by translation; it never auto-rotates.
-  const delta=avatar.position.clone().sub(oldPosition);
-  camera.position.add(delta);
-  controls.target.add(delta);
+  // Keep the avatar in view without forcing the camera behind it.
+  // Preserve the user's current viewing direction and distance.
+  const offset=camera.position.clone().sub(controls.target);
+  const desiredTarget=new THREE.Vector3(
+    avatar.position.x,
+    avatar.position.y+1.05,
+    avatar.position.z
+  );
+
+  controls.target.lerp(desiredTarget,0.22);
+  const desiredCamera=controls.target.clone().add(offset);
+  camera.position.lerp(desiredCamera,0.22);
 }
 
 Promise.all([
