@@ -21,7 +21,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#d9e6ef;font-family:-a
 <div id="loading">아틀리에 불러오는 중…</div>
 <div id="hud">
   <b>Atelier</b>
-  <div>WASD / 방향키 이동 · 마우스 드래그 시점</div>
+  <div>바닥 클릭 이동 · WASD / 방향키 직접 이동 · 드래그 시점 · 휠 줌</div>
   <div id="status">준비 중</div>
   <div id="actions">
     <button data-action="Avatar_Idle">Idle</button>
@@ -70,7 +70,12 @@ sun.position.set(-12,-8,18);sun.castShadow=true;scene.add(sun);
 const controls=new OrbitControls(camera,renderer.domElement);
 controls.target.set(0,1.15,0);
 controls.enableDamping=true;
-controls.maxPolarAngle=Math.PI*.49;
+controls.enablePan=false;
+controls.enableZoom=true;
+controls.minDistance=2.8;
+controls.maxDistance=10.0;
+controls.minPolarAngle=0.65;
+controls.maxPolarAngle=1.48;
 
 const loader=new GLTFLoader();
 const clock=new THREE.Clock();
@@ -82,6 +87,12 @@ let avatar=null;
 let mixer=null;
 let actions={};
 let current=null;
+let clickTarget=null;
+
+const floorPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+const raycaster=new THREE.Raycaster();
+const pointerNdc=new THREE.Vector2();
+let pointerDownX=0, pointerDownY=0, pointerDownTime=0;
 
 function loadGLB(url){
   return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
@@ -133,36 +144,98 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 
+renderer.domElement.addEventListener('pointerdown',e=>{
+  pointerDownX=e.clientX;
+  pointerDownY=e.clientY;
+  pointerDownTime=performance.now();
+});
+
+renderer.domElement.addEventListener('pointerup',e=>{
+  const moved=Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY);
+  const elapsed=performance.now()-pointerDownTime;
+
+  // A short, nearly stationary pointer gesture is a floor click.
+  // Dragging remains OrbitControls camera rotation.
+  if(moved>7 || elapsed>500 || !avatar) return;
+
+  const rect=renderer.domElement.getBoundingClientRect();
+  pointerNdc.x=((e.clientX-rect.left)/rect.width)*2-1;
+  pointerNdc.y=-((e.clientY-rect.top)/rect.height)*2+1;
+
+  raycaster.setFromCamera(pointerNdc,camera);
+  const hit=new THREE.Vector3();
+  if(!raycaster.ray.intersectPlane(floorPlane,hit)) return;
+
+  // Clamp clicked target to the usable circular atelier floor.
+  const FLOOR_RADIUS=5.15;
+  const radial=Math.hypot(hit.x,hit.z);
+  if(radial>FLOOR_RADIUS){
+    const s=FLOOR_RADIUS/radial;
+    hit.x*=s;
+    hit.z*=s;
+  }
+
+  hit.y=avatar.position.y;
+  clickTarget=hit.clone();
+});
+
 function updatePlayer(dt){
   if(!avatar)return;
 
   const forwardInput=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
   const sideInput=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
+  const keyboardMoving=!!(forwardInput||sideInput);
 
-  if(!forwardInput&&!sideInput){
+  const move=new THREE.Vector3();
+
+  if(keyboardMoving){
+    // Manual input cancels click-to-walk.
+    clickTarget=null;
+
+    const camForward=new THREE.Vector3();
+    camera.getWorldDirection(camForward);
+    camForward.y=0;
+    camForward.normalize();
+
+    const camRight=new THREE.Vector3()
+      .crossVectors(camForward,new THREE.Vector3(0,1,0))
+      .normalize();
+
+    move
+      .addScaledVector(camForward,forwardInput)
+      .addScaledVector(camRight,sideInput);
+
+    if(move.lengthSq()>0) move.normalize();
+  } else if(clickTarget){
+    move.copy(clickTarget).sub(avatar.position);
+    move.y=0;
+
+    const distance=move.length();
+    if(distance<0.08){
+      avatar.position.x=clickTarget.x;
+      avatar.position.z=clickTarget.z;
+      clickTarget=null;
+      play('Avatar_Idle');
+      return;
+    }
+    move.normalize();
+  } else {
     if(current===actions['Avatar_Walk']) play('Avatar_Idle');
     return;
   }
 
-  // Movement is relative to the current camera view, projected onto the floor.
-  const camForward=new THREE.Vector3();
-  camera.getWorldDirection(camForward);
-  camForward.y=0;
-  camForward.normalize();
-
-  const camRight=new THREE.Vector3().crossVectors(camForward,new THREE.Vector3(0,1,0)).normalize();
-
-  const move=new THREE.Vector3()
-    .addScaledVector(camForward,forwardInput)
-    .addScaledVector(camRight,sideInput);
-
-  if(move.lengthSq()>0) move.normalize();
-
   const speed=2.0;
-  const next=avatar.position.clone().addScaledVector(move,speed*dt);
+  const oldPosition=avatar.position.clone();
 
-  // Keep the player inside the circular atelier floor.
-  const FLOOR_RADIUS=5.3;
+  let step=speed*dt;
+  if(clickTarget){
+    const remaining=avatar.position.distanceTo(clickTarget);
+    step=Math.min(step,remaining);
+  }
+
+  const next=avatar.position.clone().addScaledVector(move,step);
+
+  const FLOOR_RADIUS=5.15;
   const radial=Math.hypot(next.x,next.z);
   if(radial>FLOOR_RADIUS){
     const s=FLOOR_RADIUS/radial;
@@ -170,16 +243,13 @@ function updatePlayer(dt){
     next.z*=s;
   }
 
-  const oldPosition=avatar.position.clone();
   avatar.position.copy(next);
 
-  // Face the actual direction of travel.
+  // Face actual movement direction.
   avatar.rotation.y=Math.atan2(move.x,move.z);
-
   play('Avatar_Walk');
 
-  // Follow by TRANSLATING the camera, never auto-rotating it.
-  // The view direction changes only when the user drags the mouse.
+  // Camera follows only by translation; it never auto-rotates.
   const delta=avatar.position.clone().sub(oldPosition);
   camera.position.add(delta);
   controls.target.add(delta);
@@ -189,7 +259,7 @@ Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./models/atelier_interior_decor.glb').catch(()=>null)
+  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,interiorDecorGLB])=>{
   environment=envGLB.scene;
 fitEnvironment(environment);
@@ -205,11 +275,17 @@ fitEnvironment(environment);
     scene.add(interiorDecor);
   }
 
-  // play only the boat animation from the environment file
+  // Play every exported environment animation (boats etc.).
   if(envGLB.animations?.length){
     const envMixer=new THREE.AnimationMixer(environment);
-    const boatClip=envGLB.animations.find(c=>/Boat/i.test(c.name));
-    if(boatClip){envMixer.clipAction(boatClip).play(); scene.userData.envMixer=envMixer;}
+    envGLB.animations.forEach(clip=>{
+      const action=envMixer.clipAction(clip);
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.clampWhenFinished=false;
+      action.play();
+    });
+    scene.userData.envMixer=envMixer;
+    console.log('Environment animations:', envGLB.animations.map(c=>c.name));
   }
 
   avatar=avGLB.scene;
