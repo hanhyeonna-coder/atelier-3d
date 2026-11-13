@@ -95,7 +95,7 @@ let boatMixer=null;
 const WALK_RADIUS=5.35;
 const CAMERA_RADIUS=5.85;
 const MOVE_SPEED=1.85;
-const MODEL_YAW_CORRECTION=Math.PI; // Blender/glTF front correction. Keep in one place.
+const MODEL_YAW_CORRECTION=0; // Blender/glTF front correction. Keep in one place.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
@@ -117,6 +117,20 @@ const keys=new Set();
 
 function loadGLB(url){
   return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
+}
+
+function normalizeAvatarOrientation(model){
+  // The exported rig has its own ~97° Y rotation.
+  // Cancel that once at the model container level so movement yaw is clean.
+  const rig=model.getObjectByName('AtelierAvatarRig');
+  if(!rig)return;
+
+  const q=rig.quaternion.clone();
+  const e=new THREE.Euler().setFromQuaternion(q,'YXZ');
+  model.rotation.y -= e.y;
+  model.updateMatrixWorld(true);
+
+  console.log('Avatar rig yaw cancelled:',THREE.MathUtils.radToDeg(e.y));
 }
 
 function normalizeAvatarOrigin(model){
@@ -167,6 +181,26 @@ function enhanceMaterials(root){
       }
     });
   });
+}
+
+function correctBoatClip(sourceClip){
+  const clip=sourceClip.clone();
+
+  // The exported boat root loops around X ±15 / Z ±10.8,
+  // while the boat mesh has a large local Z offset.
+  // Expand the path so no part of the boat intersects the pavilion floor.
+  for(const track of clip.tracks){
+    if(!track.name.endsWith('.position'))continue;
+
+    const values=track.values;
+    for(let i=0;i<values.length;i+=3){
+      values[i]   *= 1.42;  // X: push route outward
+      values[i+1] -= 0.18;  // Y: keep boat slightly lower on water
+      values[i+2] *= 1.42;  // Z: push route outward
+    }
+  }
+
+  return clip;
 }
 
 function playAvatar(name,fade=.12){
@@ -335,9 +369,13 @@ function updateMovement(dt){
   if(manual){
     moveTarget=null;
 
-    // Camera-relative controls.
-    const forward=new THREE.Vector3(-Math.sin(camYaw),0,-Math.cos(camYaw)).normalize();
-    const right=new THREE.Vector3(Math.cos(camYaw),0,-Math.sin(camYaw)).normalize();
+    // Camera-relative controls from the ACTUAL rendered camera.
+    const forward=new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y=0;
+    forward.normalize();
+
+    const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).normalize();
 
     dir.addScaledVector(forward,f);
     dir.addScaledVector(right,s);
@@ -411,7 +449,8 @@ Promise.all([
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      boatGLB.animations.forEach(clip=>{
+      boatGLB.animations.forEach(sourceClip=>{
+        const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
         a.setLoop(THREE.LoopRepeat,Infinity);
         a.play();
@@ -428,6 +467,7 @@ Promise.all([
   enhanceMaterials(avatarModel);
   avatarRoot.add(avatarModel);
   normalizeAvatarOrigin(avatarModel);
+  normalizeAvatarOrientation(avatarModel);
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   avGLB.animations.forEach(clip=>{
