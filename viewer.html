@@ -92,15 +92,15 @@ let envMixer=null;
 let boatMixer=null;
 
 // Pavilion controller constants.
-const WALK_RADIUS=3.85;
-const CAMERA_RADIUS=4.55;
+const WALK_RADIUS=5.35;
+const CAMERA_RADIUS=5.85;
 const MOVE_SPEED=1.85;
 const MODEL_YAW_CORRECTION=0; // Blender/glTF front correction. Keep in one place.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
 let camPitch=.92;
-let camDistance=4.6;
+let camDistance=4.8;
 let camTarget=new THREE.Vector3(0,1.05,-1.8);
 
 const raycaster=new THREE.Raycaster();
@@ -116,6 +116,28 @@ const keys=new Set();
 
 function loadGLB(url){
   return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
+}
+
+function normalizeAvatarOrigin(model){
+  // Blender exported this avatar with a large scene-space offset.
+  // Recenter the visible model inside avatarRoot without touching animation tracks.
+  model.updateMatrixWorld(true);
+
+  const box=new THREE.Box3().setFromObject(model);
+  const center=box.getCenter(new THREE.Vector3());
+  const min=box.min.clone();
+
+  // Put feet at local Y=0 and horizontal center at local X/Z=0.
+  model.position.x-=center.x;
+  model.position.z-=center.z;
+  model.position.y-=min.y;
+
+  model.updateMatrixWorld(true);
+
+  console.log('Avatar origin normalized', {
+    center:[center.x,center.y,center.z],
+    minY:min.y
+  });
 }
 
 function enhanceMaterials(root){
@@ -187,7 +209,7 @@ function updateCamera(){
   // Camera target follows avatar exactly so the avatar cannot drift off-screen.
   camTarget.set(
     avatarRoot.position.x,
-    avatarRoot.position.y+1.05,
+    avatarRoot.position.y+1.15,
     avatarRoot.position.z
   );
 
@@ -204,7 +226,7 @@ function updateCamera(){
   clampXZ(desired,CAMERA_RADIUS);
   desired.y=THREE.MathUtils.clamp(desired.y,1.35,4.25);
 
-  camera.position.lerp(desired,.18);
+  camera.position.copy(desired);
   camera.lookAt(camTarget);
 }
 
@@ -228,7 +250,7 @@ function setClickTarget(clientX,clientY){
 
   moveTarget.set(hit.x,avatarRoot.position.y,hit.z);
   playAvatar('Avatar_Walk');
-  status.textContent='이동 중';
+  status.textContent='이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1);
 }
 
 renderer.domElement.addEventListener('pointerdown',e=>{
@@ -270,7 +292,7 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
 renderer.domElement.addEventListener('wheel',e=>{
   e.preventDefault();
-  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.004,2.5,5.2);
+  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.004,2.0,7.2);
 },{passive:false});
 
 addEventListener('keydown',e=>{
@@ -385,6 +407,7 @@ Promise.all([
   avatarModel=avGLB.scene;
   enhanceMaterials(avatarModel);
   avatarRoot.add(avatarModel);
+  normalizeAvatarOrigin(avatarModel);
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   avGLB.animations.forEach(clip=>{
