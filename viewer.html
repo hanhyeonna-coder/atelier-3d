@@ -357,6 +357,24 @@ fitEnvironment(environment);
     scene.add(interiorDecor);
   }
 
+  if(boatGLB){
+    boatScene=boatGLB.scene;
+    enhanceSceneMaterials(boatScene);
+    scene.add(boatScene);
+
+    if(boatGLB.animations?.length){
+      const boatMixer=new THREE.AnimationMixer(boatScene);
+      boatGLB.animations.forEach(clip=>{
+        const action=boatMixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat,Infinity);
+        action.clampWhenFinished=false;
+        action.play();
+      });
+      scene.userData.boatMixer=boatMixer;
+      console.log('Boat animations:',boatGLB.animations.map(c=>c.name));
+    }
+  }
+
   // Play every exported environment animation (boats etc.).
   if(envGLB.animations?.length){
     const envMixer=new THREE.AnimationMixer(environment);
