@@ -3,17 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Atelier GLB Viewer</title>
+<title>Atelier 3D</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
 #app{position:fixed;inset:0}
-#hud{position:fixed;left:18px;top:18px;z-index:10;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);padding:12px 14px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.12);font-size:13px;color:#3e332d}
-#hud b{display:block;margin-bottom:6px}
-#status{font-size:12px;opacity:.75}
-#actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-#actions button{border:0;border-radius:10px;padding:7px 10px;background:#725640;color:white;cursor:pointer}
-#actions button:hover{filter:brightness(1.08)}
-#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;color:#49392f;font-weight:700}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:700;color:#4b3a30}
+#hud{position:fixed;left:16px;top:16px;z-index:10;padding:10px 13px;border-radius:14px;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.1);pointer-events:none}
+#hud b{display:block;margin-bottom:5px}
+#version{opacity:.45;font-size:10px;margin-top:4px}
 </style>
 </head>
 <body>
@@ -21,15 +18,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#d9e6ef;font-family:-a
 <div id="loading">아틀리에 불러오는 중…</div>
 <div id="hud">
   <b>Atelier</b>
-  <div>바닥 클릭 이동 · WASD / 방향키 직접 이동 · 드래그 시점 · 휠 줌</div>
-  <div id="status">준비 중</div>
-  <div id="actions">
-    <button data-action="Avatar_Idle">Idle</button>
-    <button data-action="Avatar_Walk">Walk</button>
-    <button data-action="Avatar_Sit">Sit</button>
-    <button data-action="Avatar_Paint">Paint</button>
-  </div>
+  <div>클릭: 이동 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
+  <div id="status">불러오는 중</div>
+  <div id="version">controller v2.0</div>
 </div>
+
 <script type="importmap">
 {
   "imports":{
@@ -38,21 +31,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#d9e6ef;font-family:-a
   }
 }
 </script>
+
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 
-const app=document.getElementById('app');
 const loading=document.getElementById('loading');
 const status=document.getElementById('status');
 
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xdceaf2);
+scene.background=new THREE.Color(0xd8e6ee);
 
-const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.05,300);
-camera.position.set(0,2.2,-6.5);
+const camera=new THREE.PerspectiveCamera(46,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -61,343 +52,286 @@ renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=0.92;
+renderer.toneMappingExposure=.92;
+document.getElementById('app').appendChild(renderer.domElement);
 
 const pmrem=new THREE.PMREMGenerator(renderer);
-scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
-scene.environmentIntensity=0.42;
-app.appendChild(renderer.domElement);
+scene.environment=pmrem.fromScene(new RoomEnvironment(),.04).texture;
+scene.environmentIntensity=.38;
 
-scene.add(new THREE.HemisphereLight(0xfff7ed,0x73879a,0.95));
+scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,.9));
 
-const sun=new THREE.DirectionalLight(0xffddb0,2.35);
-sun.position.set(-8,11,-4);
+const sun=new THREE.DirectionalLight(0xffddb5,2.15);
+sun.position.set(-8,10,-4);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.near=0.5;
-sun.shadow.camera.far=40;
-sun.shadow.camera.left=-10;
-sun.shadow.camera.right=10;
-sun.shadow.camera.top=10;
-sun.shadow.camera.bottom=-10;
-sun.shadow.bias=-0.00035;
+sun.shadow.camera.near=.5;
+sun.shadow.camera.far=35;
+sun.shadow.camera.left=-9;
+sun.shadow.camera.right=9;
+sun.shadow.camera.top=9;
+sun.shadow.camera.bottom=-9;
+sun.shadow.bias=-.00035;
 scene.add(sun);
 
-const softFill=new THREE.DirectionalLight(0xbfdcff,0.45);
-softFill.position.set(7,5,6);
-scene.add(softFill);
-
-const controls=new OrbitControls(camera,renderer.domElement);
-controls.target.set(0,1.15,0);
-controls.enableDamping=true;
-controls.enablePan=false;
-controls.enableZoom=true;
-controls.minDistance=2.4;
-controls.maxDistance=5.2;
-controls.minPolarAngle=0.72;
-controls.maxPolarAngle=1.42;
+const fill=new THREE.DirectionalLight(0xc6ddff,.35);
+fill.position.set(6,5,5);
+scene.add(fill);
 
 const loader=new GLTFLoader();
 const clock=new THREE.Clock();
 
-let environment=null;
-let furniture=null;
-let interiorDecor=null;
-let boatScene=null;
-let avatar=null;
-let mixer=null;
-let actions={};
-let current=null;
-let clickTarget=null;
-const MODEL_FORWARD_OFFSET=Math.PI;
-let walkSurfaces=[];
+let avatarRoot=null;
+let avatarModel=null;
+let avatarMixer=null;
+const avatarActions={};
+let currentAction=null;
+let moveTarget=null;
+
+let envMixer=null;
+let boatMixer=null;
+
+// Pavilion controller constants.
+const WALK_RADIUS=3.85;
+const CAMERA_RADIUS=4.55;
+const MOVE_SPEED=1.85;
+const MODEL_YAW_CORRECTION=0; // Blender/glTF front correction. Keep in one place.
+
+// Camera orbit state. Completely independent from character facing.
+let camYaw=0;
+let camPitch=.92;
+let camDistance=4.6;
+let camTarget=new THREE.Vector3(0,1.05,-1.8);
 
 const raycaster=new THREE.Raycaster();
-const pointerNdc=new THREE.Vector2();
-let pointerDownX=0, pointerDownY=0, pointerDownTime=0;
+const pointer=new THREE.Vector2();
+const groundPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+
+let pointerDown=false;
+let dragged=false;
+let downX=0,downY=0;
+let lastX=0,lastY=0;
+
+const keys=new Set();
 
 function loadGLB(url){
   return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
 }
 
-
-function fitEnvironment(root){
-  const box=new THREE.Box3().setFromObject(root);
-  const center=box.getCenter(new THREE.Vector3());
-  // Blender pavilion is authored around world origin; only correct obvious export offsets.
-  if(center.length()>50) root.position.sub(center);
-}
-
-function rebuildWalkSurfaces(root){
-  walkSurfaces=[];
+function enhanceMaterials(root){
   root.traverse(o=>{
     if(!o.isMesh)return;
-
-    const n=(o.name||'').toLowerCase();
-
-    // Exclude obvious non-floor elements.
-    if(
-      n.includes('glass') ||
-      n.includes('dome') ||
-      n.includes('roof') ||
-      n.includes('wall') ||
-      n.includes('flower') ||
-      n.includes('tree') ||
-      n.includes('boat') ||
-      n.includes('water') ||
-      n.includes('easel') ||
-      n.includes('stool')
-    ) return;
-
-    // Keep meshes whose world-space bounding box reaches the floor area.
-    const box=new THREE.Box3().setFromObject(o);
-    if(box.min.y < 0.35 && box.max.y < 0.9){
-      walkSurfaces.push(o);
-    }
-  });
-
-  console.log('Walk surfaces:',walkSurfaces.map(o=>o.name));
-}
-
-function enhanceSceneMaterials(root){
-  root.traverse(o=>{
-    if(!o.isMesh)return;
-
     o.castShadow=true;
     o.receiveShadow=true;
 
     const mats=Array.isArray(o.material)?o.material:[o.material];
     mats.filter(Boolean).forEach(mat=>{
       const label=((mat.name||'')+' '+(o.name||'')).toLowerCase();
-
-      // Restore the glass-dome feeling that Blender viewport had.
-      if(label.includes('glass') || label.includes('dome')){
+      if(label.includes('glass')||label.includes('dome')){
         mat.transparent=true;
-        mat.opacity=Math.min(mat.opacity ?? 1,0.26);
-        mat.roughness=0.08;
-        mat.metalness=0.0;
-        if('transmission' in mat) mat.transmission=0.72;
-        if('thickness' in mat) mat.thickness=0.08;
-        if('ior' in mat) mat.ior=1.45;
-        mat.envMapIntensity=1.15;
+        mat.opacity=Math.min(mat.opacity ?? 1,.28);
+        mat.roughness=.09;
+        mat.metalness=0;
+        if('transmission' in mat)mat.transmission=.68;
+        if('thickness' in mat)mat.thickness=.08;
+        if('ior' in mat)mat.ior=1.45;
+        if('envMapIntensity' in mat)mat.envMapIntensity=1.05;
         mat.side=THREE.DoubleSide;
         mat.depthWrite=false;
         mat.needsUpdate=true;
-      }else{
-        if('envMapIntensity' in mat) mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.35);
+      }else if('envMapIntensity' in mat){
+        mat.envMapIntensity=Math.max(mat.envMapIntensity||0,.3);
       }
     });
   });
 }
 
-function clampCameraInside(){
-  // Never allow the camera to leave the pavilion interior.
-  const CAMERA_RADIUS=4.35;
-  const r=Math.hypot(camera.position.x,camera.position.z);
-  if(r>CAMERA_RADIUS){
-    const s=CAMERA_RADIUS/r;
-    camera.position.x*=s;
-    camera.position.z*=s;
-  }
-  camera.position.y=THREE.MathUtils.clamp(camera.position.y,1.25,4.6);
+function playAvatar(name,fade=.12){
+  const next=avatarActions[name];
+  if(!next)return;
 
-  const TARGET_RADIUS=4.25;
-  const tr=Math.hypot(controls.target.x,controls.target.z);
-  if(tr>TARGET_RADIUS){
-    const s=TARGET_RADIUS/tr;
-    controls.target.x*=s;
-    controls.target.z*=s;
-  }
-  controls.target.y=THREE.MathUtils.clamp(controls.target.y,0.8,2.1);
-}
-
-function play(name,fade=.18){
-  const next=actions[name];
-  if(!next){status.textContent='액션 없음: '+name;return;}
-  if(current===next){
-    if(!next.isRunning()) next.reset().play();
+  if(currentAction===next){
+    if(!next.isRunning())next.reset().play();
     return;
   }
 
-  next.reset();
   next.enabled=true;
   next.clampWhenFinished=false;
+  next.setLoop(THREE.LoopRepeat,Infinity);
+  next.reset().play();
 
-  // Idle, Walk and Paint are continuous loops.
-  if(name==='Avatar_Idle' || name==='Avatar_Walk' || name==='Avatar_Paint'){
-    next.setLoop(THREE.LoopRepeat, Infinity);
-    next.repetitions=Infinity;
-  } else {
-    next.setLoop(THREE.LoopRepeat, Infinity);
-  }
-
-  next.setEffectiveTimeScale(1).setEffectiveWeight(1).play();
-
-  if(current && current!==next){
-    current.crossFadeTo(next,fade,false);
-  }
-
-  current=next;
+  if(currentAction)currentAction.crossFadeTo(next,fade,false);
+  currentAction=next;
   status.textContent=name;
 }
 
-const keys=new Set();
-addEventListener('keydown',e=>{
-  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'].includes(e.code)){
-    keys.add(e.code); e.preventDefault();
+function setAvatarFacing(dir){
+  // Rotate the OUTER group, not the animated GLB itself.
+  // This prevents animation tracks from fighting the movement direction.
+  avatarRoot.rotation.y=Math.atan2(dir.x,dir.z)+MODEL_YAW_CORRECTION;
+}
+
+function clampXZ(v,radius){
+  const r=Math.hypot(v.x,v.z);
+  if(r>radius){
+    const s=radius/r;
+    v.x*=s;
+    v.z*=s;
   }
-});
-addEventListener('keyup',e=>keys.delete(e.code));
+  return v;
+}
 
-let pointerDragged=false;
+function updateCamera(){
+  if(!avatarRoot)return;
 
-renderer.domElement.addEventListener('pointerdown',e=>{
-  pointerDownX=e.clientX;
-  pointerDownY=e.clientY;
-  pointerDragged=false;
-}, true);
+  // Camera target follows avatar exactly so the avatar cannot drift off-screen.
+  camTarget.set(
+    avatarRoot.position.x,
+    avatarRoot.position.y+1.05,
+    avatarRoot.position.z
+  );
 
-renderer.domElement.addEventListener('pointermove',e=>{
-  if(e.buttons && Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>8){
-    pointerDragged=true;
-  }
-}, true);
+  const cp=Math.cos(camPitch);
+  const offset=new THREE.Vector3(
+    Math.sin(camYaw)*cp*camDistance,
+    Math.sin(camPitch)*camDistance,
+    Math.cos(camYaw)*cp*camDistance
+  );
 
-renderer.domElement.addEventListener('pointerup',e=>{
-  if(pointerDragged || !avatar) return;
+  const desired=camTarget.clone().add(offset);
+
+  // Camera itself must remain inside the glass pavilion.
+  clampXZ(desired,CAMERA_RADIUS);
+  desired.y=THREE.MathUtils.clamp(desired.y,1.35,4.25);
+
+  camera.position.lerp(desired,.18);
+  camera.lookAt(camTarget);
+}
+
+function setClickTarget(clientX,clientY){
+  if(!avatarRoot)return;
 
   const rect=renderer.domElement.getBoundingClientRect();
-  pointerNdc.x=((e.clientX-rect.left)/rect.width)*2-1;
-  pointerNdc.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  pointer.x=((clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((clientY-rect.top)/rect.height)*2+1;
 
-  raycaster.setFromCamera(pointerNdc,camera);
+  raycaster.setFromCamera(pointer,camera);
 
-  let hitPoint=null;
+  const hit=new THREE.Vector3();
+  if(!raycaster.ray.intersectPlane(groundPlane,hit))return;
 
-  // First choice: actual visible pavilion floor meshes.
-  if(walkSurfaces.length){
-    const hits=raycaster.intersectObjects(walkSurfaces,true);
-    if(hits.length){
-      hitPoint=hits[0].point.clone();
-    }
-  }
-
-  // Fallback: horizontal floor plane at avatar foot height.
-  if(!hitPoint){
-    const fallbackPlane=new THREE.Plane(
-      new THREE.Vector3(0,1,0),
-      -avatar.position.y
-    );
-    const p=new THREE.Vector3();
-    if(raycaster.ray.intersectPlane(fallbackPlane,p)){
-      hitPoint=p;
-    }
-  }
-
-  if(!hitPoint)return;
-
-  const FLOOR_RADIUS=4.55;
-  const radial=Math.hypot(hitPoint.x,hitPoint.z);
-
-  // Ignore clicks outside the actual pavilion rather than sending avatar to rim.
-  if(radial>FLOOR_RADIUS){
+  // Ignore clicks outside pavilion instead of snapping to outer edge.
+  if(Math.hypot(hit.x,hit.z)>WALK_RADIUS){
     status.textContent='파빌리온 안쪽 바닥을 클릭해 주세요';
     return;
   }
 
-  clickTarget=new THREE.Vector3(
-    hitPoint.x,
-    avatar.position.y,
-    hitPoint.z
-  );
-
+  moveTarget.set(hit.x,avatarRoot.position.y,hit.z);
+  playAvatar('Avatar_Walk');
   status.textContent='이동 중';
-  play('Avatar_Walk');
-}, true);
+}
 
-function updatePlayer(dt){
-  if(!avatar)return;
+renderer.domElement.addEventListener('pointerdown',e=>{
+  if(e.button!==0)return;
+  pointerDown=true;
+  dragged=false;
+  downX=lastX=e.clientX;
+  downY=lastY=e.clientY;
+  renderer.domElement.setPointerCapture?.(e.pointerId);
+});
 
-  const forwardInput=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
-  const sideInput=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
-  const keyboardMoving=!!(forwardInput||sideInput);
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(!pointerDown)return;
 
-  const move=new THREE.Vector3();
+  const total=Math.hypot(e.clientX-downX,e.clientY-downY);
+  if(total>7)dragged=true;
 
-  if(keyboardMoving){
-    // Manual input cancels click-to-walk.
-    clickTarget=null;
+  if(dragged){
+    const dx=e.clientX-lastX;
+    const dy=e.clientY-lastY;
+    camYaw-=dx*.006;
+    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,.42,1.16);
+  }
 
-    const camForward=new THREE.Vector3();
-    camera.getWorldDirection(camForward);
-    camForward.y=0;
-    camForward.normalize();
+  lastX=e.clientX;
+  lastY=e.clientY;
+});
 
-    const camRight=new THREE.Vector3()
-      .crossVectors(camForward,new THREE.Vector3(0,1,0))
-      .normalize();
+renderer.domElement.addEventListener('pointerup',e=>{
+  if(e.button!==0)return;
 
-    move
-      .addScaledVector(camForward,forwardInput)
-      .addScaledVector(camRight,sideInput);
+  if(pointerDown&&!dragged){
+    setClickTarget(e.clientX,e.clientY);
+  }
 
-    if(move.lengthSq()>0) move.normalize();
-  } else if(clickTarget){
-    move.copy(clickTarget).sub(avatar.position);
-    move.y=0;
+  pointerDown=false;
+  renderer.domElement.releasePointerCapture?.(e.pointerId);
+});
 
-    const distance=move.length();
-    if(distance<0.12){
-      avatar.position.x=clickTarget.x;
-      avatar.position.z=clickTarget.z;
-      clickTarget=null;
-      play('Avatar_Idle');
-      status.textContent='Avatar_Idle';
+renderer.domElement.addEventListener('wheel',e=>{
+  e.preventDefault();
+  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.004,2.5,5.2);
+},{passive:false});
+
+addEventListener('keydown',e=>{
+  if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){
+    keys.add(e.code);
+    e.preventDefault();
+  }
+});
+addEventListener('keyup',e=>keys.delete(e.code));
+
+function updateMovement(dt){
+  if(!avatarRoot)return;
+
+  const f=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
+  const s=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
+
+  const dir=new THREE.Vector3();
+  let manual=!!(f||s);
+
+  if(manual){
+    moveTarget=null;
+
+    // Camera-relative controls.
+    const forward=new THREE.Vector3(-Math.sin(camYaw),0,-Math.cos(camYaw)).normalize();
+    const right=new THREE.Vector3(Math.cos(camYaw),0,-Math.sin(camYaw)).normalize();
+
+    dir.addScaledVector(forward,f);
+    dir.addScaledVector(right,s);
+    if(dir.lengthSq()>0)dir.normalize();
+  }else if(moveTarget){
+    dir.copy(moveTarget).sub(avatarRoot.position);
+    dir.y=0;
+
+    const distance=dir.length();
+    if(distance<.09){
+      avatarRoot.position.x=moveTarget.x;
+      avatarRoot.position.z=moveTarget.z;
+      moveTarget=null;
+      playAvatar('Avatar_Idle');
       return;
     }
-    move.normalize();
-  } else {
-    if(current===actions['Avatar_Walk']) play('Avatar_Idle');
+
+    dir.normalize();
+  }else{
+    if(currentAction===avatarActions['Avatar_Walk'])playAvatar('Avatar_Idle');
     return;
   }
 
-  const speed=2.0;
-  const oldPosition=avatar.position.clone();
+  setAvatarFacing(dir);
 
-  let step=speed*dt;
-  if(clickTarget){
-    const remaining=avatar.position.distanceTo(clickTarget);
+  let step=MOVE_SPEED*dt;
+  if(moveTarget){
+    const remaining=avatarRoot.position.distanceTo(moveTarget);
     step=Math.min(step,remaining);
   }
 
-  const next=avatar.position.clone().addScaledVector(move,step);
+  const next=avatarRoot.position.clone().addScaledVector(dir,step);
+  clampXZ(next,WALK_RADIUS);
+  avatarRoot.position.copy(next);
 
-  const FLOOR_RADIUS=4.65;
-  const radial=Math.hypot(next.x,next.z);
-  if(radial>FLOOR_RADIUS){
-    const s=FLOOR_RADIUS/radial;
-    next.x*=s;
-    next.z*=s;
-  }
-
-  avatar.position.copy(next);
-
-  // Face actual movement direction.
-  avatar.rotation.y=Math.atan2(move.x,move.z)+MODEL_FORWARD_OFFSET;
-  play('Avatar_Walk');
-
-  // Keep the avatar in view without forcing the camera behind it.
-  // Preserve the user's current viewing direction and distance.
-  const offset=camera.position.clone().sub(controls.target);
-  const desiredTarget=new THREE.Vector3(
-    avatar.position.x,
-    avatar.position.y+1.05,
-    avatar.position.z
-  );
-
-  controls.target.lerp(desiredTarget,0.22);
-  const desiredCamera=controls.target.clone().add(offset);
-  camera.position.lerp(desiredCamera,0.22);
+  playAvatar('Avatar_Walk');
 }
 
 Promise.all([
@@ -406,86 +340,80 @@ Promise.all([
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
-]).then(([envGLB,avGLB,furnitureGLB,interiorDecorGLB,boatGLB])=>{
-  environment=envGLB.scene;
-fitEnvironment(environment);
-  enhanceSceneMaterials(environment);
-  scene.add(environment);
-  rebuildWalkSurfaces(environment);
+]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
+  enhanceMaterials(envGLB.scene);
+  scene.add(envGLB.scene);
 
-  if(furnitureGLB){
-    furniture=furnitureGLB.scene;
-    enhanceSceneMaterials(furniture);
-    scene.add(furniture);
+  if(envGLB.animations?.length){
+    envMixer=new THREE.AnimationMixer(envGLB.scene);
+    envGLB.animations.forEach(clip=>{
+      const a=envMixer.clipAction(clip);
+      a.setLoop(THREE.LoopRepeat,Infinity);
+      a.play();
+    });
   }
 
-  if(interiorDecorGLB){
-    interiorDecor=interiorDecorGLB.scene;
-    enhanceSceneMaterials(interiorDecor);
-    scene.add(interiorDecor);
+  if(furnitureGLB){
+    enhanceMaterials(furnitureGLB.scene);
+    scene.add(furnitureGLB.scene);
+  }
+
+  if(flowerGLB){
+    enhanceMaterials(flowerGLB.scene);
+    scene.add(flowerGLB.scene);
   }
 
   if(boatGLB){
-    boatScene=boatGLB.scene;
-    enhanceSceneMaterials(boatScene);
-    scene.add(boatScene);
+    enhanceMaterials(boatGLB.scene);
+    scene.add(boatGLB.scene);
 
     if(boatGLB.animations?.length){
-      const boatMixer=new THREE.AnimationMixer(boatScene);
+      boatMixer=new THREE.AnimationMixer(boatGLB.scene);
       boatGLB.animations.forEach(clip=>{
-        const action=boatMixer.clipAction(clip);
-        action.setLoop(THREE.LoopRepeat,Infinity);
-        action.clampWhenFinished=false;
-        action.play();
+        const a=boatMixer.clipAction(clip);
+        a.setLoop(THREE.LoopRepeat,Infinity);
+        a.play();
       });
-      scene.userData.boatMixer=boatMixer;
-      console.log('Boat animations:',boatGLB.animations.map(c=>c.name));
     }
   }
 
-  // Play every exported environment animation (boats etc.).
-  if(envGLB.animations?.length){
-    const envMixer=new THREE.AnimationMixer(environment);
-    envGLB.animations.forEach(clip=>{
-      const action=envMixer.clipAction(clip);
-      action.setLoop(THREE.LoopRepeat, Infinity);
-      action.clampWhenFinished=false;
-      action.play();
-    });
-    scene.userData.envMixer=envMixer;
-    console.log('Environment animations:', envGLB.animations.map(c=>c.name));
-  }
+  // Outer transform group controls movement/facing.
+  avatarRoot=new THREE.Group();
+  avatarRoot.position.set(0,0,-2.35);
+  scene.add(avatarRoot);
 
-  avatar=avGLB.scene;
-  avatar.position.set(0,0,-2.6);
-  enhanceSceneMaterials(avatar);
-  scene.add(avatar);
+  avatarModel=avGLB.scene;
+  enhanceMaterials(avatarModel);
+  avatarRoot.add(avatarModel);
 
-  mixer=new THREE.AnimationMixer(avatar);
-  avGLB.animations.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
-  play(actions['Avatar_Idle']?'Avatar_Idle':Object.keys(actions)[0],0);
+  avatarMixer=new THREE.AnimationMixer(avatarModel);
+  avGLB.animations.forEach(clip=>{
+    avatarActions[clip.name]=avatarMixer.clipAction(clip);
+  });
 
-  console.log('Avatar actions:',Object.keys(actions));
+  playAvatar('Avatar_Idle',0);
+  updateCamera();
+
   loading.style.display='none';
+  status.textContent='준비됨';
 }).catch(err=>{
   console.error(err);
-  loading.textContent='GLB 로드 실패 — models 폴더의 파일명을 확인해 주세요.';
+  loading.textContent='GLB 로드 실패';
   status.textContent=String(err);
-});
-
-document.querySelectorAll('[data-action]').forEach(b=>{
-  b.onclick=()=>play(b.dataset.action);
 });
 
 function tick(){
   requestAnimationFrame(tick);
+
   const dt=Math.min(clock.getDelta(),.05);
-  if(mixer)mixer.update(dt);
-  if(scene.userData.envMixer)scene.userData.envMixer.update(dt);
-  if(scene.userData.boatMixer)scene.userData.boatMixer.update(dt);
-  updatePlayer(dt);
-  controls.update();
-  clampCameraInside();
+
+  if(avatarMixer)avatarMixer.update(dt);
+  if(envMixer)envMixer.update(dt);
+  if(boatMixer)boatMixer.update(dt);
+
+  updateMovement(dt);
+  updateCamera();
+
   renderer.render(scene,camera);
 }
 tick();
