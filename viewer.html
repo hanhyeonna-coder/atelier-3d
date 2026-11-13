@@ -136,7 +136,7 @@ function updatePlayer(dt){
 }
 
 Promise.all([
-  loadGLB('./models/atelier_environment.glb'),
+  loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb')
 ]).then(([envGLB,avGLB])=>{
   environment=envGLB.scene;
