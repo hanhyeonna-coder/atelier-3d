@@ -148,5 +148,19 @@ def main():
     print("Recommended filename: atelier_master_web_optimized.blend")
     print("============================================\n")
 
+    # Show result in a Blender popup so macOS users don't need System Console.
+    def draw_popup(self, context):
+        self.layout.label(text=f"공유 메시로 묶인 오브젝트: {relinked_objects}")
+        self.layout.label(text=f"삭제된 중복 메시: {removed_meshes}")
+        self.layout.label(text=f"현재 고유 환경 메시: {unique_meshes_used}")
+        self.layout.separator()
+        self.layout.label(text="이제 새 이름으로 저장 후 환경만 GLB로 Export 하세요.")
+
+    bpy.context.window_manager.popup_menu(
+        draw_popup,
+        title="Atelier 최적화 완료",
+        icon='INFO'
+    )
+
 if __name__ == "__main__":
     main()
