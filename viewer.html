@@ -95,13 +95,14 @@ let boatMixer=null;
 const WALK_RADIUS=5.35;
 const CAMERA_RADIUS=5.85;
 const MOVE_SPEED=1.85;
-const MODEL_YAW_CORRECTION=0; // Blender/glTF front correction. Keep in one place.
+const MODEL_YAW_CORRECTION=Math.PI; // Blender/glTF front correction. Keep in one place.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
 let camPitch=.92;
 let camDistance=4.8;
 let camTarget=new THREE.Vector3(0,1.05,-1.8);
+let cameraFocus=new THREE.Vector3(0,1.05,-1.8);
 
 const raycaster=new THREE.Raycaster();
 const pointer=new THREE.Vector2();
@@ -206,12 +207,31 @@ function clampXZ(v,radius){
 function updateCamera(){
   if(!avatarRoot)return;
 
-  // Camera target follows avatar exactly so the avatar cannot drift off-screen.
-  camTarget.set(
+  // Keep camera focus independent from avatar movement.
+  // Clicking somewhere must NOT rotate or yank the view.
+  // Only gently translate the view if the avatar gets too far from the focus.
+  const avatarFocus=new THREE.Vector3(
     avatarRoot.position.x,
     avatarRoot.position.y+1.15,
     avatarRoot.position.z
   );
+
+  const dx=avatarFocus.x-cameraFocus.x;
+  const dz=avatarFocus.z-cameraFocus.z;
+  const dist=Math.hypot(dx,dz);
+
+  // Dead-zone follow: inside this radius, camera does not move at all.
+  const DEAD_ZONE=1.65;
+  if(dist>DEAD_ZONE){
+    const excess=dist-DEAD_ZONE;
+    const ux=dx/dist;
+    const uz=dz/dist;
+    cameraFocus.x += ux*excess;
+    cameraFocus.z += uz*excess;
+  }
+
+  cameraFocus.y=1.15;
+  camTarget.copy(cameraFocus);
 
   const cp=Math.cos(camPitch);
   const offset=new THREE.Vector3(
@@ -222,7 +242,7 @@ function updateCamera(){
 
   const desired=camTarget.clone().add(offset);
 
-  // Camera itself must remain inside the glass pavilion.
+  // Camera remains inside pavilion.
   clampXZ(desired,CAMERA_RADIUS);
   desired.y=THREE.MathUtils.clamp(desired.y,1.35,4.25);
 
@@ -415,6 +435,13 @@ Promise.all([
   });
 
   playAvatar('Avatar_Idle',0);
+
+  cameraFocus.set(
+    avatarRoot.position.x,
+    avatarRoot.position.y+1.15,
+    avatarRoot.position.z
+  );
+  camTarget.copy(cameraFocus);
   updateCamera();
 
   loading.style.display='none';
