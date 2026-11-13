@@ -163,4 +163,26 @@ def main():
     )
 
 if __name__ == "__main__":
-    main()
+    import traceback
+
+    def _popup(title, lines, icon='INFO'):
+        def draw(self, context):
+            for line in lines:
+                self.layout.label(text=str(line)[:110])
+        bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
+
+    _popup("Atelier", ["스크립트 실행 시작됨"])
+
+    try:
+        main()
+    except Exception as e:
+        traceback.print_exc()
+        _popup(
+            "최적화 오류",
+            [
+                type(e).__name__,
+                str(e),
+                "오류 내용을 캡처해서 보내주세요."
+            ],
+            icon='ERROR'
+        )
