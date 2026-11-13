@@ -59,9 +59,9 @@ const pmrem=new THREE.PMREMGenerator(renderer);
 scene.environment=pmrem.fromScene(new RoomEnvironment(),.04).texture;
 scene.environmentIntensity=.38;
 
-scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,.9));
+scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,1.08));
 
-const sun=new THREE.DirectionalLight(0xffddb5,2.15);
+const sun=new THREE.DirectionalLight(0xffddb5,1.72);
 sun.position.set(-8,10,-4);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
@@ -165,82 +165,75 @@ function enhanceMaterials(root){
     o.castShadow=true;
     o.receiveShadow=true;
 
-    mats.filter(Boolean).forEach(mat=>{
+    mats.filter(Boolean).forEach((mat,index)=>{
       const materialName=(mat.name||'').toLowerCase();
-      const label=objectName+' '+materialName;
 
+      // Exact classifications from the exported GLB.
       const isGlass =
-        label.includes('glass') ||
-        label.includes('dome');
+        materialName==='glass' ||
+        objectName==='glass dome';
 
       const isWater =
-        label.includes('water') ||
-        label.includes('lake') ||
-        label.includes('river');
+        materialName==='ext water' ||
+        objectName==='ext water surface';
 
       const isCanvas =
-        label.includes('canvas') ||
-        label.includes('painting') ||
-        label.includes('picture') ||
-        label.includes('artwork') ||
-        label.includes('board');
+        materialName==='canvas' ||
+        objectName.includes('canvas');
 
-      const isWood =
-        label.includes('wood') ||
-        label.includes('pillar') ||
-        label.includes('column') ||
-        label.includes('beam') ||
-        label.includes('post') ||
-        label.includes('frame') ||
-        label.includes('roof beam');
+      const isStructureWood =
+        materialName==='warm oak' ||
+        materialName==='ext dark wood' ||
+        objectName.startsWith('column ') ||
+        objectName.startsWith('roof beam ') ||
+        objectName.includes('rear support') ||
+        objectName.includes('easel');
 
-      // --- GLASS / DOME ---
+      // GLASS: subtle clear greenhouse glass, not a foggy overlay.
       if(isGlass){
-        mat.transparent=true;
-        mat.opacity=0.24;
-        mat.depthWrite=false;
-        mat.depthTest=true;
-        mat.side=THREE.DoubleSide;
+        const glass=new THREE.MeshPhysicalMaterial({
+          name:'Atelier Clear Glass',
+          color:new THREE.Color('#f4fbff'),
+          transparent:true,
+          opacity:0.10,
+          transmission:0.22,
+          roughness:0.07,
+          metalness:0,
+          ior:1.45,
+          thickness:0.08,
+          clearcoat:1,
+          clearcoatRoughness:0.05,
+          envMapIntensity:0.85,
+          side:THREE.DoubleSide,
+          depthWrite:false,
+          depthTest:true
+        });
 
-        if('color' in mat) mat.color.set('#eef8ff');
-        if('roughness' in mat) mat.roughness=0.10;
-        if('metalness' in mat) mat.metalness=0.0;
-        if('transmission' in mat) mat.transmission=0.92;
-        if('thickness' in mat) mat.thickness=0.28;
-        if('ior' in mat) mat.ior=1.45;
-        if('clearcoat' in mat) mat.clearcoat=1.0;
-        if('clearcoatRoughness' in mat) mat.clearcoatRoughness=0.08;
-        if('envMapIntensity' in mat) mat.envMapIntensity=1.35;
+        if(Array.isArray(o.material)){
+          o.material[index]=glass;
+        }else{
+          o.material=glass;
+        }
 
         o.castShadow=false;
         o.receiveShadow=false;
-        mat.needsUpdate=true;
         return;
       }
 
-      // --- WATER ---
+      // WATER: exact exported water only.
       if(isWater){
         mat.transparent=true;
-        mat.opacity=0.92;
+        mat.opacity=0.96;
         mat.depthWrite=true;
         mat.depthTest=true;
         mat.side=THREE.DoubleSide;
 
-        if('color' in mat) mat.color.set('#6faec7');
-        if('roughness' in mat) mat.roughness=0.18;
-        if('metalness' in mat) mat.metalness=0.02;
-        if('transmission' in mat) mat.transmission=0.10;
-        if('clearcoat' in mat) mat.clearcoat=0.75;
-        if('clearcoatRoughness' in mat) mat.clearcoatRoughness=0.16;
-        if('envMapIntensity' in mat) mat.envMapIntensity=1.25;
-
-        // If Blender exported a normal map, animate it subtly.
-        if(mat.normalMap){
-          mat.normalMap.wrapS=THREE.RepeatWrapping;
-          mat.normalMap.wrapT=THREE.RepeatWrapping;
-          mat.normalMap.repeat.set(3,3);
-          o.userData.waterMaterial=mat;
-        }
+        if('color' in mat)mat.color.set('#69abc6');
+        if('roughness' in mat)mat.roughness=0.12;
+        if('metalness' in mat)mat.metalness=0.02;
+        if('clearcoat' in mat)mat.clearcoat=1;
+        if('clearcoatRoughness' in mat)mat.clearcoatRoughness=0.1;
+        if('envMapIntensity' in mat)mat.envMapIntensity=1.35;
 
         o.castShadow=false;
         o.receiveShadow=true;
@@ -248,20 +241,19 @@ function enhanceMaterials(root){
         return;
       }
 
-      // --- CANVAS / PAINTING SURFACE ---
+      // CANVAS: fully opaque white board.
       if(isCanvas){
         mat.transparent=false;
         mat.opacity=1;
         mat.depthWrite=true;
         mat.depthTest=true;
-        mat.side=THREE.DoubleSide;
         mat.alphaTest=0;
+        mat.side=THREE.FrontSide;
 
-        if('color' in mat) mat.color.set('#f6f3eb');
-        if('roughness' in mat) mat.roughness=0.92;
-        if('metalness' in mat) mat.metalness=0;
+        if('color' in mat)mat.color.set('#f7f4ec');
+        if('roughness' in mat)mat.roughness=0.96;
+        if('metalness' in mat)mat.metalness=0;
 
-        // Reduce z-fighting / rear-stick bleed on the white canvas.
         mat.polygonOffset=true;
         mat.polygonOffsetFactor=-2;
         mat.polygonOffsetUnits=-2;
@@ -272,8 +264,8 @@ function enhanceMaterials(root){
         return;
       }
 
-      // --- WOOD / STRUCTURE ---
-      if(isWood){
+      // STRUCTURAL WOOD: columns, beams, easels must never be transparent.
+      if(isStructureWood){
         mat.transparent=false;
         mat.opacity=1;
         mat.depthWrite=true;
@@ -281,10 +273,10 @@ function enhanceMaterials(root){
         mat.alphaTest=0;
         mat.side=THREE.FrontSide;
 
-        if('transmission' in mat) mat.transmission=0;
-        if('roughness' in mat) mat.roughness=Math.max(mat.roughness ?? 0.45,0.42);
-        if('metalness' in mat) mat.metalness=0;
-        if('envMapIntensity' in mat) mat.envMapIntensity=0.35;
+        if('transmission' in mat)mat.transmission=0;
+        if('roughness' in mat)mat.roughness=Math.max(mat.roughness ?? 0.45,0.45);
+        if('metalness' in mat)mat.metalness=0;
+        if('envMapIntensity' in mat)mat.envMapIntensity=0.28;
 
         o.castShadow=true;
         o.receiveShadow=true;
@@ -292,9 +284,8 @@ function enhanceMaterials(root){
         return;
       }
 
-      // Default opaque objects.
       if('envMapIntensity' in mat){
-        mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.28);
+        mat.envMapIntensity=Math.max(mat.envMapIntensity||0,0.25);
       }
     });
   });
