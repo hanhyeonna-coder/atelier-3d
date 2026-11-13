@@ -109,8 +109,9 @@ let mixer=null;
 let actions={};
 let current=null;
 let clickTarget=null;
+const MODEL_FORWARD_OFFSET=Math.PI;
+let walkSurfaces=[];
 
-const floorPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
 const raycaster=new THREE.Raycaster();
 const pointerNdc=new THREE.Vector2();
 let pointerDownX=0, pointerDownY=0, pointerDownTime=0;
@@ -125,6 +126,37 @@ function fitEnvironment(root){
   const center=box.getCenter(new THREE.Vector3());
   // Blender pavilion is authored around world origin; only correct obvious export offsets.
   if(center.length()>50) root.position.sub(center);
+}
+
+function rebuildWalkSurfaces(root){
+  walkSurfaces=[];
+  root.traverse(o=>{
+    if(!o.isMesh)return;
+
+    const n=(o.name||'').toLowerCase();
+
+    // Exclude obvious non-floor elements.
+    if(
+      n.includes('glass') ||
+      n.includes('dome') ||
+      n.includes('roof') ||
+      n.includes('wall') ||
+      n.includes('flower') ||
+      n.includes('tree') ||
+      n.includes('boat') ||
+      n.includes('water') ||
+      n.includes('easel') ||
+      n.includes('stool')
+    ) return;
+
+    // Keep meshes whose world-space bounding box reaches the floor area.
+    const box=new THREE.Box3().setFromObject(o);
+    if(box.min.y < 0.35 && box.max.y < 0.9){
+      walkSurfaces.push(o);
+    }
+  });
+
+  console.log('Walk surfaces:',walkSurfaces.map(o=>o.name));
 }
 
 function enhanceSceneMaterials(root){
@@ -223,13 +255,13 @@ renderer.domElement.addEventListener('pointerdown',e=>{
   pointerDownX=e.clientX;
   pointerDownY=e.clientY;
   pointerDragged=false;
-});
+}, true);
 
 renderer.domElement.addEventListener('pointermove',e=>{
-  if(e.buttons && Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>6){
+  if(e.buttons && Math.hypot(e.clientX-pointerDownX,e.clientY-pointerDownY)>8){
     pointerDragged=true;
   }
-});
+}, true);
 
 renderer.domElement.addEventListener('pointerup',e=>{
   if(pointerDragged || !avatar) return;
@@ -239,22 +271,49 @@ renderer.domElement.addEventListener('pointerup',e=>{
   pointerNdc.y=-((e.clientY-rect.top)/rect.height)*2+1;
 
   raycaster.setFromCamera(pointerNdc,camera);
-  const hit=new THREE.Vector3();
-  const ok=raycaster.ray.intersectPlane(floorPlane,hit);
-  if(!ok) return;
 
-  const FLOOR_RADIUS=4.55;
-  const radial=Math.hypot(hit.x,hit.z);
-  if(radial>FLOOR_RADIUS){
-    const s=FLOOR_RADIUS/radial;
-    hit.x*=s;
-    hit.z*=s;
+  let hitPoint=null;
+
+  // First choice: actual visible pavilion floor meshes.
+  if(walkSurfaces.length){
+    const hits=raycaster.intersectObjects(walkSurfaces,true);
+    if(hits.length){
+      hitPoint=hits[0].point.clone();
+    }
   }
 
-  hit.y=avatar.position.y;
-  clickTarget=hit.clone();
+  // Fallback: horizontal floor plane at avatar foot height.
+  if(!hitPoint){
+    const fallbackPlane=new THREE.Plane(
+      new THREE.Vector3(0,1,0),
+      -avatar.position.y
+    );
+    const p=new THREE.Vector3();
+    if(raycaster.ray.intersectPlane(fallbackPlane,p)){
+      hitPoint=p;
+    }
+  }
+
+  if(!hitPoint)return;
+
+  const FLOOR_RADIUS=4.55;
+  const radial=Math.hypot(hitPoint.x,hitPoint.z);
+
+  // Ignore clicks outside the actual pavilion rather than sending avatar to rim.
+  if(radial>FLOOR_RADIUS){
+    status.textContent='파빌리온 안쪽 바닥을 클릭해 주세요';
+    return;
+  }
+
+  clickTarget=new THREE.Vector3(
+    hitPoint.x,
+    avatar.position.y,
+    hitPoint.z
+  );
+
   status.textContent='이동 중';
-});
+  play('Avatar_Walk');
+}, true);
 
 function updatePlayer(dt){
   if(!avatar)return;
@@ -288,11 +347,12 @@ function updatePlayer(dt){
     move.y=0;
 
     const distance=move.length();
-    if(distance<0.08){
+    if(distance<0.12){
       avatar.position.x=clickTarget.x;
       avatar.position.z=clickTarget.z;
       clickTarget=null;
       play('Avatar_Idle');
+      status.textContent='Avatar_Idle';
       return;
     }
     move.normalize();
@@ -323,7 +383,7 @@ function updatePlayer(dt){
   avatar.position.copy(next);
 
   // Face actual movement direction.
-  avatar.rotation.y=Math.atan2(move.x,move.z);
+  avatar.rotation.y=Math.atan2(move.x,move.z)+MODEL_FORWARD_OFFSET;
   play('Avatar_Walk');
 
   // Keep the avatar in view without forcing the camera behind it.
@@ -351,6 +411,7 @@ Promise.all([
 fitEnvironment(environment);
   enhanceSceneMaterials(environment);
   scene.add(environment);
+  rebuildWalkSurfaces(environment);
 
   if(furnitureGLB){
     furniture=furnitureGLB.scene;
