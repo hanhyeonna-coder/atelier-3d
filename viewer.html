@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v2.0</div>
+  <div id="version">controller v2.1</div>
 </div>
 
 <script type="importmap">
@@ -95,7 +95,7 @@ let boatMixer=null;
 const WALK_RADIUS=5.35;
 const CAMERA_RADIUS=5.85;
 const MOVE_SPEED=1.85;
-const MODEL_YAW_CORRECTION=0; // Blender/glTF front correction. Keep in one place.
+const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
@@ -176,8 +176,27 @@ function enhanceMaterials(root){
         mat.side=THREE.DoubleSide;
         mat.depthWrite=false;
         mat.needsUpdate=true;
-      }else if('envMapIntensity' in mat){
-        mat.envMapIntensity=Math.max(mat.envMapIntensity||0,.3);
+      }else{
+        const isArtwork =
+          label.includes('canvas') ||
+          label.includes('painting') ||
+          label.includes('picture') ||
+          label.includes('artwork') ||
+          label.includes('easel');
+
+        if(isArtwork){
+          mat.transparent=false;
+          mat.opacity=1;
+          mat.depthWrite=true;
+          mat.depthTest=true;
+          if('alphaTest' in mat) mat.alphaTest=0;
+          mat.side=THREE.DoubleSide;
+          mat.needsUpdate=true;
+        }
+
+        if('envMapIntensity' in mat){
+          mat.envMapIntensity=Math.max(mat.envMapIntensity||0,.3);
+        }
       }
     });
   });
@@ -241,44 +260,48 @@ function clampXZ(v,radius){
 function updateCamera(){
   if(!avatarRoot)return;
 
-  // Keep camera focus independent from avatar movement.
-  // Clicking somewhere must NOT rotate or yank the view.
-  // Only gently translate the view if the avatar gets too far from the focus.
   const avatarFocus=new THREE.Vector3(
     avatarRoot.position.x,
     avatarRoot.position.y+1.15,
     avatarRoot.position.z
   );
 
+  // Loose follow. Camera orientation never changes because of movement.
   const dx=avatarFocus.x-cameraFocus.x;
   const dz=avatarFocus.z-cameraFocus.z;
   const dist=Math.hypot(dx,dz);
+  const DEAD_ZONE=1.45;
 
-  // Dead-zone follow: inside this radius, camera does not move at all.
-  const DEAD_ZONE=1.65;
   if(dist>DEAD_ZONE){
     const excess=dist-DEAD_ZONE;
-    const ux=dx/dist;
-    const uz=dz/dist;
-    cameraFocus.x += ux*excess;
-    cameraFocus.z += uz*excess;
+    cameraFocus.x += (dx/dist)*excess;
+    cameraFocus.z += (dz/dist)*excess;
   }
 
   cameraFocus.y=1.15;
   camTarget.copy(cameraFocus);
 
-  const cp=Math.cos(camPitch);
-  const offset=new THREE.Vector3(
-    Math.sin(camYaw)*cp*camDistance,
-    Math.sin(camPitch)*camDistance,
-    Math.cos(camYaw)*cp*camDistance
+  const horizontalDir=new THREE.Vector2(Math.sin(camYaw),Math.cos(camYaw)).normalize();
+
+  // Preserve camera angle while keeping camera inside pavilion.
+  // Solve ray-circle intersection from camera focus along view offset.
+  const fx=camTarget.x, fz=camTarget.z;
+  const dx2=horizontalDir.x, dz2=horizontalDir.y;
+  const b=2*(fx*dx2+fz*dz2);
+  const cc=fx*fx+fz*fz-CAMERA_RADIUS*CAMERA_RADIUS;
+  const disc=Math.max(0,b*b-4*cc);
+  const maxHorizontal=(-b+Math.sqrt(disc))/2;
+
+  const requestedHorizontal=Math.cos(camPitch)*camDistance;
+  const horizontal=Math.max(.35,Math.min(requestedHorizontal,maxHorizontal-.08));
+
+  const desired=new THREE.Vector3(
+    camTarget.x+dx2*horizontal,
+    camTarget.y+Math.sin(camPitch)*camDistance,
+    camTarget.z+dz2*horizontal
   );
 
-  const desired=camTarget.clone().add(offset);
-
-  // Camera remains inside pavilion.
-  clampXZ(desired,CAMERA_RADIUS);
-  desired.y=THREE.MathUtils.clamp(desired.y,1.35,4.25);
+  desired.y=THREE.MathUtils.clamp(desired.y,1.25,4.45);
 
   camera.position.copy(desired);
   camera.lookAt(camTarget);
@@ -302,7 +325,7 @@ function setClickTarget(clientX,clientY){
     return;
   }
 
-  moveTarget.set(hit.x,avatarRoot.position.y,hit.z);
+  moveTarget=new THREE.Vector3(hit.x,avatarRoot.position.y,hit.z);
   playAvatar('Avatar_Walk');
   status.textContent='이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1);
 }
@@ -346,7 +369,9 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
 renderer.domElement.addEventListener('wheel',e=>{
   e.preventDefault();
-  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.004,2.0,7.2);
+  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.006,1.8,7.2);
+  camera.fov=THREE.MathUtils.clamp(camera.fov+e.deltaY*.018,32,68);
+  camera.updateProjectionMatrix();
 },{passive:false});
 
 addEventListener('keydown',e=>{
@@ -449,6 +474,7 @@ Promise.all([
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
+      boatMixer.timeScale=1/3;
       boatGLB.animations.forEach(sourceClip=>{
         const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
@@ -467,7 +493,6 @@ Promise.all([
   enhanceMaterials(avatarModel);
   avatarRoot.add(avatarModel);
   normalizeAvatarOrigin(avatarModel);
-  normalizeAvatarOrientation(avatarModel);
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   avGLB.animations.forEach(clip=>{
