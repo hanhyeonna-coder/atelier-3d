@@ -85,13 +85,6 @@ function loadGLB(url){
   return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
 }
 
-function hideEmbeddedAvatar(root){
-  const hideWords=['AtelierAvatarRig','AV ','AV_'];
-  root.traverse(o=>{
-    const n=o.name||'';
-    if(hideWords.some(w=>n.startsWith(w)||n.includes(w))) o.visible=false;
-  });
-}
 
 function fitEnvironment(root){
   const box=new THREE.Box3().setFromObject(root);
@@ -140,8 +133,7 @@ Promise.all([
   loadGLB('./models/avatar_01.glb')
 ]).then(([envGLB,avGLB])=>{
   environment=envGLB.scene;
-  hideEmbeddedAvatar(environment);
-  fitEnvironment(environment);
+fitEnvironment(environment);
   scene.add(environment);
 
   // play only the boat animation from the environment file
