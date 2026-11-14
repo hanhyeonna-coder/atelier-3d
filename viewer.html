@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.8 · real flower meshes + corrected sit front + fixed boat geometry</div>
+  <div id="version">controller v3.9 · true flower export + stale-env cleanup + clamp wood + visible boat orbit</div>
 </div>
 
 <script type="importmap">
@@ -122,9 +122,9 @@ let boatMover=null;
 let boatPrevPos=new THREE.Vector3();
 let boatHasPrev=false;
 let boatAngle=0;
-const BOAT_RADIUS=18.5;
-const BOAT_ANGULAR_SPEED=0.040; // ~157 sec per lap: slow but visibly moving
-const BOAT_Y=-1.65;
+const BOAT_RADIUS=10.5;
+const BOAT_ANGULAR_SPEED=0.060; // ~105 sec per lap: about 10x slower than original
+const BOAT_Y=-0.75;
 
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
@@ -583,28 +583,13 @@ function keepOnlyFurniture(root){
 }
 
 function keepOnlyFlowers(root){
-  // The dedicated root flower GLB should be shown as exported.
-  // Do not filter child meshes by name; many flower children have generic names.
-  root.traverse(o=>{ o.visible=true; });
-
-  // Match the latest Blender setup: Lower flower decoration stands at -90°.
-  const lowerRoots=[];
+  // Latest flower GLB already contains applied Blender orientation.
+  // Show it exactly as exported; do not add another -90° rotation.
   root.traverse(o=>{
-    const n=(o.name||'').toLowerCase();
-    if(!n.includes('lower'))return;
-
-    let p=o.parent;
-    while(p && p!==root){
-      if((p.name||'').toLowerCase().includes('lower'))return;
-      p=p.parent;
-    }
-    lowerRoots.push(o);
+    o.visible=true;
+    if(o.isMesh)o.frustumCulled=false;
   });
-
-  lowerRoots.forEach(o=>{
-    o.rotation.x=-Math.PI/2;
-    o.updateMatrixWorld(true);
-  });
+  root.updateMatrixWorld(true);
 }
 
 function keepFurnitureInsidePavilion(furnitureRoot){
@@ -1238,10 +1223,19 @@ Promise.all([
   loadGLB('./atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
-  // Any boat geometry baked into the environment is a stale duplicate.
-  // Keep only the dedicated animated boat GLB below.
+  // Hide stale decor/furniture baked into the environment.
+  // Dedicated GLBs below are now the single source of truth.
   envGLB.scene.traverse(o=>{
-    if((o.name||'').toLowerCase().includes('boat'))o.visible=false;
+    const n=(o.name||'').toLowerCase();
+    if(
+      n.includes('boat') ||
+      n.includes('easel') ||
+      n.includes('stool') ||
+      n.includes('upper flower') ||
+      n.includes('lower flower')
+    ){
+      o.visible=false;
+    }
   });
   enhanceMaterials(envGLB.scene);
   scene.add(envGLB.scene);
@@ -1259,6 +1253,25 @@ Promise.all([
     furnitureScene=furnitureGLB.scene;
     keepOnlyFurniture(furnitureGLB.scene);
     enhanceMaterials(furnitureGLB.scene);
+
+    // Exported Clamp mesh uses Dark Oak. Force it here so it can never inherit Canvas white.
+    furnitureGLB.scene.traverse(o=>{
+      const n=(o.name||'').toLowerCase();
+      if(!o.isMesh || !n.includes('clamp'))return;
+
+      const mats=Array.isArray(o.material)?o.material:[o.material];
+      const fixed=mats.map(mat=>{
+        if(!mat)return mat;
+        const m=mat.clone();
+        if(m.color)m.color.set('#5b2f18');
+        if('roughness' in m)m.roughness=.56;
+        if('metalness' in m)m.metalness=0;
+        m.needsUpdate=true;
+        return m;
+      });
+      o.material=Array.isArray(o.material)?fixed:fixed[0];
+    });
+
     scene.add(furnitureGLB.scene);
     keepFurnitureInsidePavilion(furnitureGLB.scene);
   }
@@ -1277,7 +1290,8 @@ Promise.all([
 
     if(boatMover){
       // Exact GLB structure: EXT Boat 0 has Bow/Cabin/Hull mesh children.
-      // Scale mesh geometry 10x, but preserve each child's local position.
+      // Scale geometry 10x, keep child offsets unchanged, and force visibility.
+      boatMover.traverse(o=>{o.visible=true;});
       boatMover.children.forEach(child=>{
         if(child.isMesh)child.scale.multiplyScalar(10);
       });
