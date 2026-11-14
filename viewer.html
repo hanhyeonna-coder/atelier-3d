@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.0 · NPC seats/collision</div>
+  <div id="version">controller v3.1 · visual polish + giant slow boat</div>
 </div>
 
 <script type="importmap">
@@ -42,7 +42,8 @@ const loading=document.getElementById('loading');
 const status=document.getElementById('status');
 
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xd8e6ee);
+scene.background=new THREE.Color(0xa9bcc9);
+scene.fog=new THREE.FogExp2(0xa9bcc9,0.012);
 
 const camera=new THREE.PerspectiveCamera(46,innerWidth/innerHeight,.05,200);
 
@@ -53,17 +54,17 @@ renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=.92;
+renderer.toneMappingExposure=1.02;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const pmrem=new THREE.PMREMGenerator(renderer);
-scene.environment=pmrem.fromScene(new RoomEnvironment(),.04).texture;
-scene.environmentIntensity=.38;
+scene.environment=pmrem.fromScene(new RoomEnvironment(),.05).texture;
+scene.environmentIntensity=.62;
 
-scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,1.08));
+scene.add(new THREE.HemisphereLight(0xfff1de,0x66798b,1.22));
 
-const sun=new THREE.DirectionalLight(0xffddb5,1.72);
-sun.position.set(-8,10,-4);
+const sun=new THREE.DirectionalLight(0xffd6ad,1.95);
+sun.position.set(-10,12,-5);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
 sun.shadow.camera.near=.5;
@@ -75,8 +76,8 @@ sun.shadow.camera.bottom=-9;
 sun.shadow.bias=-.00035;
 scene.add(sun);
 
-const fill=new THREE.DirectionalLight(0xc6ddff,.35);
-fill.position.set(6,5,5);
+const fill=new THREE.DirectionalLight(0xcfe0ff,.50);
+fill.position.set(8,6,7);
 scene.add(fill);
 
 const loader=new GLTFLoader();
@@ -175,6 +176,74 @@ function normalizeAvatarOrigin(model){
   });
 }
 
+function makeWaterNormalTexture(){
+  const size=256;
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=size;
+  const ctx=canvas.getContext('2d');
+  const img=ctx.createImageData(size,size);
+
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const nx=x/size*Math.PI*2;
+      const ny=y/size*Math.PI*2;
+      const wave=
+        Math.sin(nx*5.0+Math.sin(ny*2.0))*0.55+
+        Math.sin(ny*8.0+nx*1.7)*0.28+
+        Math.sin((nx+ny)*12.0)*0.17;
+      const gx=Math.cos(nx*5.0+Math.sin(ny*2.0))*0.55+
+               Math.cos((nx+ny)*12.0)*0.20;
+      const gy=Math.cos(ny*8.0+nx*1.7)*0.40+
+               Math.cos((nx+ny)*12.0)*0.18;
+
+      const i=(y*size+x)*4;
+      img.data[i]=THREE.MathUtils.clamp(128+gx*48,0,255);
+      img.data[i+1]=THREE.MathUtils.clamp(128+gy*48,0,255);
+      img.data[i+2]=THREE.MathUtils.clamp(238+wave*10,0,255);
+      img.data[i+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(7,7);
+  tex.colorSpace=THREE.NoColorSpace;
+  tex.needsUpdate=true;
+  return tex;
+}
+
+const atelierWaterNormal=makeWaterNormalTexture();
+const lanternLights=[];
+
+function addLanternGlow(root){
+  let added=0;
+  root.updateMatrixWorld(true);
+
+  root.traverse(o=>{
+    if(added>=14 || !o.isMesh)return;
+    const n=(o.name||'').toLowerCase();
+    const mn=Array.isArray(o.material)
+      ? o.material.map(m=>(m?.name||'').toLowerCase()).join(' ')
+      : (o.material?.name||'').toLowerCase();
+
+    if(!(n.includes('lantern')||n.includes('lamp')||mn.includes('lantern')||mn.includes('lamp')))return;
+
+    const pos=o.getWorldPosition(new THREE.Vector3());
+
+    // Avoid creating several lights for parts of the same lantern.
+    if(lanternLights.some(l=>l.position.distanceTo(pos)<0.55))return;
+
+    const light=new THREE.PointLight(0xffc982,2.25,5.4,2.0);
+    light.position.copy(pos);
+    light.position.y+=0.12;
+    light.castShadow=false;
+    scene.add(light);
+    lanternLights.push(light);
+    added++;
+  });
+}
+
 function enhanceMaterials(root){
   root.traverse(o=>{
     if(!o.isMesh)return;
@@ -196,6 +265,23 @@ function enhanceMaterials(root){
       const isWater =
         materialName==='ext water' ||
         objectName==='ext water surface';
+
+      const isFoliage =
+        objectName.includes('leaf') ||
+        objectName.includes('leaves') ||
+        objectName.includes('foliage') ||
+        objectName.includes('branch') ||
+        objectName.includes('tree') ||
+        materialName.includes('leaf') ||
+        materialName.includes('leaves') ||
+        materialName.includes('foliage') ||
+        materialName.includes('tree');
+
+      const isLantern =
+        objectName.includes('lantern') ||
+        objectName.includes('lamp') ||
+        materialName.includes('lantern') ||
+        materialName.includes('lamp');
 
       const isCanvas =
         materialName==='canvas' ||
@@ -240,25 +326,82 @@ function enhanceMaterials(root){
         return;
       }
 
-      // WATER: exact exported water only.
+      // WATER: richer reflective water with animated procedural ripples.
       if(isWater){
-        mat.transparent=true;
-        mat.opacity=0.96;
-        mat.depthWrite=true;
-        mat.depthTest=true;
-        mat.side=THREE.DoubleSide;
+        const water=new THREE.MeshPhysicalMaterial({
+          name:'Atelier Water',
+          color:new THREE.Color('#2f8fa6'),
+          transparent:true,
+          opacity:0.94,
+          roughness:0.10,
+          metalness:0.02,
+          transmission:0.05,
+          ior:1.333,
+          thickness:0.18,
+          clearcoat:1,
+          clearcoatRoughness:0.07,
+          envMapIntensity:2.0,
+          normalMap:atelierWaterNormal.clone(),
+          normalScale:new THREE.Vector2(0.32,0.32),
+          side:THREE.DoubleSide,
+          depthWrite:true,
+          depthTest:true
+        });
+        water.normalMap.wrapS=water.normalMap.wrapT=THREE.RepeatWrapping;
+        water.normalMap.repeat.set(7,7);
 
-        if('color' in mat)mat.color.set('#69abc6');
-        if('roughness' in mat)mat.roughness=0.12;
-        if('metalness' in mat)mat.metalness=0.02;
-        if('clearcoat' in mat)mat.clearcoat=1;
-        if('clearcoatRoughness' in mat)mat.clearcoatRoughness=0.1;
-        if('envMapIntensity' in mat)mat.envMapIntensity=1.35;
+        if(Array.isArray(o.material)){
+          o.material[index]=water;
+        }else{
+          o.material=water;
+        }
 
+        o.userData.waterMaterial=water;
         o.castShadow=false;
+        o.receiveShadow=true;
+        return;
+      }
+
+      // FOLIAGE: stronger depth/readability without plastic shine.
+      if(isFoliage){
+        mat.transparent=!!mat.map && mat.transparent;
+        mat.side=THREE.DoubleSide;
+        mat.depthWrite=true;
+        mat.alphaTest=mat.transparent?Math.max(mat.alphaTest||0,0.12):0;
+
+        if('roughness' in mat)mat.roughness=0.92;
+        if('metalness' in mat)mat.metalness=0;
+        if('envMapIntensity' in mat)mat.envMapIntensity=0.18;
+
+        if(mat.color){
+          // Small deterministic variation between tree meshes.
+          let h=0;
+          for(let k=0;k<objectName.length;k++)h=(h*31+objectName.charCodeAt(k))>>>0;
+          const variation=((h%9)-4)/100;
+          const hsl={h:0,s:0,l:0};
+          mat.color.getHSL(hsl);
+          mat.color.setHSL(
+            hsl.h,
+            THREE.MathUtils.clamp(hsl.s*1.08,0,1),
+            THREE.MathUtils.clamp(hsl.l+variation,0.05,0.95)
+          );
+        }
+
+        o.castShadow=true;
         o.receiveShadow=true;
         mat.needsUpdate=true;
         return;
+      }
+
+      // LANTERNS: warm emissive housing; actual light is added after load.
+      if(isLantern){
+        if(mat.emissive){
+          mat.emissive.set('#ffd29a');
+          mat.emissiveIntensity=2.4;
+        }
+        if('roughness' in mat)mat.roughness=0.34;
+        if('envMapIntensity' in mat)mat.envMapIntensity=0.6;
+        mat.needsUpdate=true;
       }
 
       // CANVAS: fully opaque white board.
@@ -314,17 +457,16 @@ function enhanceMaterials(root){
 function correctBoatClip(sourceClip){
   const clip=sourceClip.clone();
 
-  // The exported boat root loops around X ±15 / Z ±10.8,
-  // while the boat mesh has a large local Z offset.
-  // Expand the path so no part of the boat intersects the pavilion floor.
+  // Boat is now much larger, so keep the route well outside the pavilion
+  // and lower the hull enough that its upper geometry never clips into the floor.
   for(const track of clip.tracks){
     if(!track.name.endsWith('.position'))continue;
 
     const values=track.values;
     for(let i=0;i<values.length;i+=3){
-      values[i]   *= 1.42;  // X: push route outward
-      values[i+1] -= 0.18;  // Y: keep boat slightly lower on water
-      values[i+2] *= 1.42;  // Z: push route outward
+      values[i]   *= 3.15;
+      values[i+1] -= 1.05;
+      values[i+2] *= 3.15;
     }
   }
 
@@ -868,6 +1010,7 @@ Promise.all([
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   enhanceMaterials(envGLB.scene);
   scene.add(envGLB.scene);
+  addLanternGlow(envGLB.scene);
 
   if(envGLB.animations?.length){
     envMixer=new THREE.AnimationMixer(envGLB.scene);
@@ -886,6 +1029,7 @@ Promise.all([
   if(flowerGLB){
     enhanceMaterials(flowerGLB.scene);
     scene.add(flowerGLB.scene);
+    addLanternGlow(flowerGLB.scene);
   }
 
   if(boatGLB){
@@ -894,13 +1038,18 @@ Promise.all([
 
     boatMover=boatGLB.scene.getObjectByName('EXT Boat 0');
     if(boatMover){
+      // Scale the actual animated boat, not the GLB scene root,
+      // so the travel path itself is not multiplied by ten.
+      boatMover.scale.multiplyScalar(10);
+      boatMover.position.y-=0.45;
       boatMover.getWorldPosition(boatPrevPos);
       boatHasPrev=true;
     }
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      boatMixer.timeScale=1/3;
+      // Previous speed was 1/3. User requested another 10x slowdown.
+      boatMixer.timeScale=1/30;
       boatGLB.animations.forEach(sourceClip=>{
         const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
@@ -983,13 +1132,15 @@ function tick(){
     updateBoatFacing();
   }
 
-  // Subtle water movement when a normal map exists.
+  // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
     const waterMaterial=o.userData?.waterMaterial;
-    if(waterMaterial?.normalMap){
-      waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.012)%1;
-      waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.007)%1;
-    }
+    if(!waterMaterial?.normalMap)return;
+
+    waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.020)%1;
+    waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.011)%1;
+    waterMaterial.clearcoatRoughness=
+      0.065+Math.sin(performance.now()*0.0013)*0.012;
   });
 
   updateMovement(dt);
