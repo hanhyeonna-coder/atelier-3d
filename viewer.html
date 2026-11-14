@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.5 · current furniture + reliable stool + unique hats</div>
+  <div id="version">controller v3.6 · aligned stools + correct sit facing + latest flowers + slower boat</div>
 </div>
 
 <script type="importmap">
@@ -477,9 +477,9 @@ function correctBoatClip(sourceClip){
 
     const values=track.values;
     for(let i=0;i<values.length;i+=3){
-      values[i]   *= 2.15;
-      values[i+1] -= 0.55;
-      values[i+2] *= 2.15;
+      values[i]   *= 2.45;
+      values[i+1] -= 1.60;
+      values[i+2] *= 2.45;
     }
   }
 
@@ -547,6 +547,29 @@ function recolorBeret(model,color){
   });
 }
 
+function keepOnlyFurniture(root){
+  root.traverse(o=>{
+    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    const keep=
+      n.includes('easel') ||
+      n.includes('stool') ||
+      n.includes('canvas');
+
+    // Keep parents of useful descendants; hide unrelated visible meshes.
+    if(o.isMesh && !keep)o.visible=false;
+  });
+}
+
+function keepOnlyFlowers(root){
+  root.traverse(o=>{
+    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    const keep=n.includes('upper') || n.includes('lower') || n.includes('flower');
+    if(o.isMesh && !keep)o.visible=false;
+  });
+}
+
 function keepFurnitureInsidePavilion(furnitureRoot){
   const roots=[];
 
@@ -584,74 +607,103 @@ function collectSeatSlots(furnitureRoot){
   seatSlots.length=0;
 
   const stoolRoots=[];
-  furnitureRoot.traverse(o=>{
-    const n=(o.name||'').toLowerCase();
-    if(!(n.includes('stool_group')||n.startsWith('stool')))return;
-
-    // Keep only the highest stool-labelled object so child meshes are not duplicated.
-    let p=o.parent;
-    while(p){
-      const pn=(p.name||'').toLowerCase();
-      if(pn.includes('stool_group')||pn.startsWith('stool'))return;
-      p=p.parent;
-    }
-    stoolRoots.push(o);
-  });
-
   const easels=[];
+
   furnitureRoot.traverse(o=>{
     const n=(o.name||'').toLowerCase();
-    if(!n.startsWith('easel'))return;
-    let p=o.parent;
-    while(p){
-      if((p.name||'').toLowerCase().startsWith('easel'))return;
-      p=p.parent;
+
+    if(n.includes('stool_group') || n.startsWith('stool')){
+      let p=o.parent;
+      while(p && p!==furnitureRoot){
+        const pn=(p.name||'').toLowerCase();
+        if(pn.includes('stool_group') || pn.startsWith('stool'))return;
+        p=p.parent;
+      }
+      stoolRoots.push(o);
+      return;
     }
-    const box=new THREE.Box3().setFromObject(o);
-    if(!box.isEmpty())easels.push({o,center:box.getCenter(new THREE.Vector3())});
+
+    if(n.startsWith('easel')){
+      let p=o.parent;
+      while(p && p!==furnitureRoot){
+        if((p.name||'').toLowerCase().startsWith('easel'))return;
+        p=p.parent;
+      }
+
+      const box=new THREE.Box3().setFromObject(o);
+      if(!box.isEmpty()){
+        easels.push({
+          o,
+          center:box.getCenter(new THREE.Vector3())
+        });
+      }
+    }
   });
+
+  // Match each stool to the closest easel, then place the stool consistently
+  // on the pavilion-center side of that easel.
+  const unused=[...easels];
 
   stoolRoots.forEach((stool,index)=>{
-    const box=new THREE.Box3().setFromObject(stool);
-    if(box.isEmpty())return;
+    const stoolBox=new THREE.Box3().setFromObject(stool);
+    if(stoolBox.isEmpty())return;
+    const stoolCenter=stoolBox.getCenter(new THREE.Vector3());
 
-    const center=box.getCenter(new THREE.Vector3());
-    let nearest=null;
+    let nearestIndex=-1;
     let nearestD=Infinity;
-
-    easels.forEach(e=>{
-      const d=(e.center.x-center.x)**2+(e.center.z-center.z)**2;
-      if(d<nearestD){nearestD=d;nearest=e;}
+    unused.forEach((e,i)=>{
+      const d=(e.center.x-stoolCenter.x)**2+(e.center.z-stoolCenter.z)**2;
+      if(d<nearestD){nearestD=d;nearestIndex=i;}
     });
 
-    const faceDir=nearest
-      ? new THREE.Vector3(nearest.center.x-center.x,0,nearest.center.z-center.z).normalize()
-      : new THREE.Vector3(-center.x,0,-center.z).normalize();
+    if(nearestIndex<0)return;
+    const easel=unused.splice(nearestIndex,1)[0];
 
-    // Avatar root stays on the floor; Avatar_Sit provides the seated body pose.
+    // From easel toward pavilion center = where the sitter should be.
+    const inward=new THREE.Vector3(-easel.center.x,0,-easel.center.z);
+    if(inward.lengthSq()<0.0001)inward.set(0,0,1);
+    inward.normalize();
+
+    // Desired stool center is ~0.95 m inward from the easel.
+    const desiredCenter=easel.center.clone().addScaledVector(inward,0.95);
+    const delta=new THREE.Vector3(
+      desiredCenter.x-stoolCenter.x,
+      0,
+      desiredCenter.z-stoolCenter.z
+    );
+    stool.position.add(delta);
+    stool.updateMatrixWorld(true);
+
+    // Recompute final stool center after moving it.
+    const finalBox=new THREE.Box3().setFromObject(stool);
+    const finalCenter=finalBox.getCenter(new THREE.Vector3());
+
+    const faceDir=new THREE.Vector3(
+      easel.center.x-finalCenter.x,
+      0,
+      easel.center.z-finalCenter.z
+    ).normalize();
+
     const floorY=avatarRoot?.position.y ?? 0;
     const seat={
       index,
       stool,
-      position:new THREE.Vector3(
-        center.x-faceDir.x*0.08,
-        floorY,
-        center.z-faceDir.z*0.08
-      ),
-      seatTop:box.max.y,
+      easel:easel.o,
+      easelCenter:easel.center.clone(),
+      position:new THREE.Vector3(finalCenter.x,floorY,finalCenter.z),
+      seatTop:finalBox.max.y,
       faceDir,
       occupiedBy:null,
       clickRadius:0.95
     };
 
-    // Mark every visible stool child so raycast clicks can resolve back to this seat.
-    stool.traverse(child=>{ child.userData.seatSlot=seat; });
+    stool.traverse(child=>{child.userData.seatSlot=seat;});
     stool.userData.seatSlot=seat;
     seatSlots.push(seat);
   });
 
   seatSlots.sort((a,b)=>Math.atan2(a.position.x,a.position.z)-Math.atan2(b.position.x,b.position.z));
-  console.log('Seat slots:',seatSlots.length,seatSlots.map(s=>[s.position.x.toFixed(2),s.position.z.toFixed(2)]));
+  console.log('Seat slots aligned to easels:',seatSlots.length);
 }
 
 function makeNPCActionSet(model,clips){
@@ -722,7 +774,7 @@ function placeNPCSeated(npc,seat){
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.root.position.copy(seat.position);
-  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION;
+  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z);
   npc.state='seated';
   npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
   playNPC(npc,'Avatar_Sit',0);
@@ -896,7 +948,7 @@ function updateNPCs(dt,now){
       if(distance<.10){
         if(npc.state==='goingToSeat'&&npc.seat){
           npc.root.position.copy(npc.seat.position);
-          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+MODEL_YAW_CORRECTION;
+          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z);
           npc.state='seated';
           npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
           npc.target=null;
@@ -1101,7 +1153,7 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         avatarRoot.rotation.y=
-          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION;
+          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z);
         playAvatar('Avatar_Sit');
         status.textContent='스툴에 앉음 · WASD 또는 바닥 클릭으로 일어나기';
       }else{
@@ -1146,7 +1198,7 @@ Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  Promise.resolve(null), // flower export in repo is invalid/duplicated; wait for corrected GLB
+  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   // Any boat geometry baked into the environment is a stale duplicate.
@@ -1168,16 +1220,16 @@ Promise.all([
 
   if(furnitureGLB){
     furnitureScene=furnitureGLB.scene;
+    keepOnlyFurniture(furnitureGLB.scene);
     enhanceMaterials(furnitureGLB.scene);
     scene.add(furnitureGLB.scene);
     keepFurnitureInsidePavilion(furnitureGLB.scene);
   }
 
   if(flowerGLB){
+    keepOnlyFlowers(flowerGLB.scene);
     enhanceMaterials(flowerGLB.scene);
     scene.add(flowerGLB.scene);
-  }else{
-    console.warn('Flower GLB disabled: models flower file duplicates furniture blob; corrected flower export needed.');
   }
 
   if(boatGLB){
@@ -1195,7 +1247,7 @@ Promise.all([
       originalChildren.forEach(child=>visual.add(child));
 
       visual.scale.setScalar(10);
-      visual.position.y=-1.55;
+      visual.position.y=-3.8;
       boatMover.userData.visualScaleGroup=visual;
 
       boatMover.getWorldPosition(boatPrevPos);
@@ -1204,7 +1256,7 @@ Promise.all([
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      boatMixer.timeScale=0.24;
+      boatMixer.timeScale=0.08;
       boatGLB.animations.forEach(sourceClip=>{
         const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
