@@ -550,7 +550,11 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
       speed:THREE.MathUtils.randFloat(1.0,1.45)
     };
 
-    const color=NPC_HAT_COLORS[i%NPC_HAT_COLORS.length];
+    // Shuffle-like random pick without repeating a hat color in this room.
+    const usedColors=new Set(npcs.map(n=>n.hatColor));
+    const availableColors=NPC_HAT_COLORS.filter(color=>!usedColors.has(color));
+    const color=(availableColors.length?availableColors:NPC_HAT_COLORS)[Math.floor(Math.random()*(availableColors.length||NPC_HAT_COLORS.length))];
+    npc.hatColor=color;
     recolorBeret(model,color);
 
     root.position.copy(randomWalkTarget(npc));
