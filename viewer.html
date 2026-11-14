@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.6 · aligned stools + correct sit facing + latest flowers + slower boat</div>
+  <div id="version">controller v3.7 · seat facing + root flowers + manual boat + easel wood fix</div>
 </div>
 
 <script type="importmap">
@@ -121,6 +121,10 @@ let boatMixer=null;
 let boatMover=null;
 let boatPrevPos=new THREE.Vector3();
 let boatHasPrev=false;
+let boatAngle=0;
+const BOAT_RADIUS=22.5;
+const BOAT_ANGULAR_SPEED=0.018; // slow, visible movement
+const BOAT_Y=-2.8;
 
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
@@ -297,8 +301,16 @@ function enhanceMaterials(root){
         materialName.includes('lamp');
 
       const isCanvas =
-        materialName==='canvas' ||
-        objectName.includes('canvas');
+        (
+          materialName==='canvas' ||
+          objectName.includes('canvas')
+        ) &&
+        !objectName.includes('easel') &&
+        !objectName.includes('support') &&
+        !objectName.includes('holder') &&
+        !objectName.includes('clip') &&
+        !objectName.includes('bar') &&
+        !objectName.includes('frame');
 
       const isStructureWood =
         materialName==='warm oak' ||
@@ -564,9 +576,19 @@ function keepOnlyFurniture(root){
 function keepOnlyFlowers(root){
   root.traverse(o=>{
     if(o===root)return;
-    const n=(o.name||'').toLowerCase();
-    const keep=n.includes('upper') || n.includes('lower') || n.includes('flower');
-    if(o.isMesh && !keep)o.visible=false;
+
+    let cur=o;
+    let keep=false;
+    while(cur && cur!==root){
+      const n=(cur.name||'').toLowerCase();
+      if(n.includes('upper') || n.includes('lower') || n.includes('flower')){
+        keep=true;
+        break;
+      }
+      cur=cur.parent;
+    }
+
+    if(o.isMesh)o.visible=keep;
   });
 }
 
@@ -774,7 +796,7 @@ function placeNPCSeated(npc,seat){
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.root.position.copy(seat.position);
-  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z);
+  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+Math.PI;
   npc.state='seated';
   npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
   playNPC(npc,'Avatar_Sit',0);
@@ -948,7 +970,7 @@ function updateNPCs(dt,now){
       if(distance<.10){
         if(npc.state==='goingToSeat'&&npc.seat){
           npc.root.position.copy(npc.seat.position);
-          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z);
+          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+Math.PI;
           npc.state='seated';
           npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
           npc.target=null;
@@ -1153,7 +1175,7 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         avatarRoot.rotation.y=
-          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z);
+          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+Math.PI;
         playAvatar('Avatar_Sit');
         status.textContent='스툴에 앉음 · WASD 또는 바닥 클릭으로 일어나기';
       }else{
@@ -1198,7 +1220,7 @@ Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
+  loadGLB('./atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   // Any boat geometry baked into the environment is a stale duplicate.
@@ -1236,10 +1258,11 @@ Promise.all([
     enhanceMaterials(boatGLB.scene);
     scene.add(boatGLB.scene);
 
-    boatMover=boatGLB.scene.getObjectByName('EXT Boat 0');
+    boatMover=boatGLB.scene.getObjectByName('EXT Boat 0') || boatGLB.scene;
+
     if(boatMover){
-      // Put all visible boat parts under a neutral visual wrapper.
-      // Animation keeps driving EXT Boat 0, while this wrapper controls size/height.
+      // Stop relying on exported transform animation. Scale the visible boat
+      // once and drive its orbit manually so size/speed/height stay deterministic.
       const visual=new THREE.Group();
       visual.name='Boat Visual Scale';
       const originalChildren=[...boatMover.children];
@@ -1247,23 +1270,22 @@ Promise.all([
       originalChildren.forEach(child=>visual.add(child));
 
       visual.scale.setScalar(10);
-      visual.position.y=-3.8;
+      visual.position.y=-2.8;
       boatMover.userData.visualScaleGroup=visual;
 
+      boatAngle=0.4;
+      boatMover.position.set(
+        Math.sin(boatAngle)*BOAT_RADIUS,
+        BOAT_Y,
+        Math.cos(boatAngle)*BOAT_RADIUS
+      );
+      boatMover.rotation.y=boatAngle+Math.PI/2;
       boatMover.getWorldPosition(boatPrevPos);
       boatHasPrev=true;
     }
 
-    if(boatGLB.animations?.length){
-      boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      boatMixer.timeScale=0.08;
-      boatGLB.animations.forEach(sourceClip=>{
-        const clip=correctBoatClip(sourceClip);
-        const a=boatMixer.clipAction(clip);
-        a.setLoop(THREE.LoopRepeat,Infinity);
-        a.play();
-      });
-    }
+    // Do not play exported boat animation; manual orbit is used in tick().
+    boatMixer=null;
   }
 
   // Outer transform group controls movement/facing.
@@ -1305,26 +1327,20 @@ Promise.all([
   status.textContent=String(err);
 });
 
-function updateBoatFacing(){
+function updateBoatMotion(dt){
   if(!boatMover)return;
 
-  const current=new THREE.Vector3();
-  boatMover.getWorldPosition(current);
+  boatAngle=(boatAngle+BOAT_ANGULAR_SPEED*dt)%(Math.PI*2);
 
-  if(boatHasPrev){
-    const dx=current.x-boatPrevPos.x;
-    const dz=current.z-boatPrevPos.z;
-    const lenSq=dx*dx+dz*dz;
+  const x=Math.sin(boatAngle)*BOAT_RADIUS;
+  const z=Math.cos(boatAngle)*BOAT_RADIUS;
 
-    if(lenSq>0.000001){
-      // Boat bow in exported GLB points along local +X.
-      // Rotate +X to the current XZ travel direction.
-      boatMover.rotation.y=Math.atan2(-dz,dx);
-    }
-  }
+  boatMover.position.x=x;
+  boatMover.position.y=BOAT_Y;
+  boatMover.position.z=z;
 
-  boatPrevPos.copy(current);
-  boatHasPrev=true;
+  // Tangent direction around the circle.
+  boatMover.rotation.y=boatAngle+Math.PI/2;
 }
 
 function tick(){
@@ -1335,10 +1351,7 @@ function tick(){
   if(avatarMixer)avatarMixer.update(dt);
   updateNPCs(dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
-  if(boatMixer){
-    boatMixer.update(dt);
-    updateBoatFacing();
-  }
+  updateBoatMotion(dt);
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
