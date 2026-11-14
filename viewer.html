@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.3 · seat click + collision + camera/boat/water</div>
+  <div id="version">controller v3.4 · latest GLB + camera/movement/boat wrapper</div>
 </div>
 
 <script type="importmap">
@@ -44,7 +44,7 @@ const status=document.getElementById('status');
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
-const camera=new THREE.PerspectiveCamera(32,innerWidth/innerHeight,.05,200);
+const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -116,17 +116,17 @@ let boatHasPrev=false;
 
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
-const CAMERA_RADIUS=8.55;
+const CAMERA_RADIUS=8.95;
 const MOVE_SPEED=1.85;
-const CENTER_BLOCK_RADIUS=2.28;
+const CENTER_BLOCK_RADIUS=1.90;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
-let camPitch=.56;
-let camDistance=5.0;
-let camTarget=new THREE.Vector3(0,1.35,-1.8);
-let cameraFocus=new THREE.Vector3(0,1.35,-1.8);
+let camPitch=.28;
+let camDistance=6.35;
+let camTarget=new THREE.Vector3(0,1.45,-1.8);
+let cameraFocus=new THREE.Vector3(0,1.45,-1.8);
 
 const raycaster=new THREE.Raycaster();
 const pointer=new THREE.Vector2();
@@ -347,13 +347,13 @@ function enhanceMaterials(root){
           clearcoatRoughness:0.035,
           envMapIntensity:2.4,
           normalMap:atelierWaterNormal.clone(),
-          normalScale:new THREE.Vector2(1.75,1.55),
+          normalScale:new THREE.Vector2(1.30,1.15),
           side:THREE.DoubleSide,
           depthWrite:true,
           depthTest:true
         });
         water.normalMap.wrapS=water.normalMap.wrapT=THREE.RepeatWrapping;
-        water.normalMap.repeat.set(2.2,2.2);
+        water.normalMap.repeat.set(2.8,2.8);
 
         if(Array.isArray(o.material)){
           o.material[index]=water;
@@ -469,9 +469,9 @@ function correctBoatClip(sourceClip){
 
     const values=track.values;
     for(let i=0;i<values.length;i+=3){
-      values[i]   *= 3.0;
-      values[i+1] -= 2.25;
-      values[i+2] *= 3.0;
+      values[i]   *= 2.15;
+      values[i+1] -= 0.55;
+      values[i+2] *= 2.15;
     }
   }
 
@@ -735,7 +735,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
 }
 
 function npcCandidateBlocked(npc,candidate,minDistance=NPC_MIN_DISTANCE){
-  if(isInsideCenterBlock(candidate,.28))return true;
+  if(isInsideCenterBlock(candidate,.20))return true;
   if(avatarRoot&&avatarRoot.position.distanceTo(candidate)<minDistance)return true;
 
   for(const other of npcs){
@@ -746,7 +746,13 @@ function npcCandidateBlocked(npc,candidate,minDistance=NPC_MIN_DISTANCE){
 }
 
 function playerCandidateBlocked(candidate,minDistance=.64){
-  if(isInsideCenterBlock(candidate,.22))return true;
+  const candidateR=Math.hypot(candidate.x,candidate.z);
+  const currentR=avatarRoot?Math.hypot(avatarRoot.position.x,avatarRoot.position.z):Infinity;
+
+  // Block entering the center table, but always allow escaping outward
+  // if the player ever starts slightly inside the safety radius.
+  if(isInsideCenterBlock(candidate,.16) && candidateR<=currentR)return true;
+
   return npcs.some(n=>n.root.position.distanceTo(candidate)<minDistance);
 }
 
@@ -868,7 +874,7 @@ function updateCamera(){
 
   const avatarFocus=new THREE.Vector3(
     avatarRoot.position.x,
-    avatarRoot.position.y+1.35,
+    avatarRoot.position.y+1.45,
     avatarRoot.position.z
   );
 
@@ -884,7 +890,7 @@ function updateCamera(){
     cameraFocus.z += (dz/dist)*excess;
   }
 
-  cameraFocus.y=1.35;
+  cameraFocus.y=1.45;
   camTarget.copy(cameraFocus);
 
   const horizontalDir=new THREE.Vector2(Math.sin(camYaw),Math.cos(camYaw)).normalize();
@@ -907,7 +913,7 @@ function updateCamera(){
     camTarget.z+dz2*horizontal
   );
 
-  desired.y=THREE.MathUtils.clamp(desired.y,1.15,4.20);
+  desired.y=THREE.MathUtils.clamp(desired.y,1.05,4.05);
 
   camera.position.copy(desired);
   camera.lookAt(camTarget);
@@ -933,7 +939,7 @@ function setClickTarget(clientX,clientY){
     return;
   }
 
-  if(isInsideCenterBlock(hit,.18)){
+  if(isInsideCenterBlock(hit,.14)){
     status.textContent='중앙 작업대는 지나갈 수 없어요';
     return;
   }
@@ -963,7 +969,7 @@ renderer.domElement.addEventListener('pointermove',e=>{
     const dx=e.clientX-lastX;
     const dy=e.clientY-lastY;
     camYaw-=dx*.006;
-    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,.24,1.04);
+    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,.10,.98);
   }
 
   lastX=e.clientX;
@@ -983,7 +989,7 @@ renderer.domElement.addEventListener('pointerup',e=>{
 
 renderer.domElement.addEventListener('wheel',e=>{
   e.preventDefault();
-  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.006,3.2,7.2);
+  camDistance=THREE.MathUtils.clamp(camDistance+e.deltaY*.006,4.6,7.8);
   // Keep the lens fixed so wheel zoom does not reintroduce a wide-angle look.
 },{passive:false});
 
@@ -1075,12 +1081,17 @@ function updateMovement(dt){
 }
 
 Promise.all([
-  loadGLB('./models/atelier_environment_web.glb'),
+  loadGLB('./atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
+  loadGLB('./atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
+  // Any boat geometry baked into the environment is a stale duplicate.
+  // Keep only the dedicated animated boat GLB below.
+  envGLB.scene.traverse(o=>{
+    if((o.name||'').toLowerCase().includes('boat'))o.visible=false;
+  });
   enhanceMaterials(envGLB.scene);
   scene.add(envGLB.scene);
 
@@ -1110,19 +1121,25 @@ Promise.all([
 
     boatMover=boatGLB.scene.getObjectByName('EXT Boat 0');
     if(boatMover){
-      // Scale the visible boat descendants directly because the animated root
-      // itself carries transform tracks that can overwrite its scale.
-      boatMover.children.forEach(child=>{
-        child.scale.multiplyScalar(10);
-      });
-      boatMover.position.y-=7.2;
+      // Put all visible boat parts under a neutral visual wrapper.
+      // Animation keeps driving EXT Boat 0, while this wrapper controls size/height.
+      const visual=new THREE.Group();
+      visual.name='Boat Visual Scale';
+      const originalChildren=[...boatMover.children];
+      boatMover.add(visual);
+      originalChildren.forEach(child=>visual.add(child));
+
+      visual.scale.setScalar(10);
+      visual.position.y=-1.55;
+      boatMover.userData.visualScaleGroup=visual;
+
       boatMover.getWorldPosition(boatPrevPos);
       boatHasPrev=true;
     }
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      boatMixer.timeScale=1/6;
+      boatMixer.timeScale=0.24;
       boatGLB.animations.forEach(sourceClip=>{
         const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
@@ -1156,7 +1173,7 @@ Promise.all([
 
   cameraFocus.set(
     avatarRoot.position.x,
-    avatarRoot.position.y+1.35,
+    avatarRoot.position.y+1.45,
     avatarRoot.position.z
   );
   camTarget.copy(cameraFocus);
@@ -1213,8 +1230,8 @@ function tick(){
     waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.075)%1;
     waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.042)%1;
     waterMaterial.normalScale.set(
-      1.55+Math.sin(performance.now()*0.0017)*0.18,
-      1.45+Math.cos(performance.now()*0.0013)*0.18
+      1.22+Math.sin(performance.now()*0.0017)*0.14,
+      1.10+Math.cos(performance.now()*0.0013)*0.14
     );
     waterMaterial.clearcoatRoughness=
       0.035+Math.sin(performance.now()*0.0015)*0.01;
