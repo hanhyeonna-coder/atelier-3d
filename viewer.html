@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.7 · seat facing + root flowers + manual boat + easel wood fix</div>
+  <div id="version">controller v3.8 · real flower meshes + corrected sit front + fixed boat geometry</div>
 </div>
 
 <script type="importmap">
@@ -122,9 +122,9 @@ let boatMover=null;
 let boatPrevPos=new THREE.Vector3();
 let boatHasPrev=false;
 let boatAngle=0;
-const BOAT_RADIUS=22.5;
-const BOAT_ANGULAR_SPEED=0.018; // slow, visible movement
-const BOAT_Y=-2.8;
+const BOAT_RADIUS=18.5;
+const BOAT_ANGULAR_SPEED=0.040; // ~157 sec per lap: slow but visibly moving
+const BOAT_Y=-1.65;
 
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
@@ -259,6 +259,16 @@ function addLanternGlow(root){
   });
 }
 
+function hasNamedAncestor(o,token){
+  let cur=o;
+  const t=token.toLowerCase();
+  while(cur){
+    if((cur.name||'').toLowerCase().includes(t))return true;
+    cur=cur.parent;
+  }
+  return false;
+}
+
 function enhanceMaterials(root){
   root.traverse(o=>{
     if(!o.isMesh)return;
@@ -300,25 +310,25 @@ function enhanceMaterials(root){
         materialName.includes('lantern') ||
         materialName.includes('lamp');
 
+      const isEaselPart=hasNamedAncestor(o,'easel');
+      const isActualCanvas=
+        objectName.includes('canvas') ||
+        objectName.includes('painting') ||
+        objectName.includes('artwork');
+
       const isCanvas =
-        (
-          materialName==='canvas' ||
-          objectName.includes('canvas')
-        ) &&
-        !objectName.includes('easel') &&
-        !objectName.includes('support') &&
-        !objectName.includes('holder') &&
-        !objectName.includes('clip') &&
-        !objectName.includes('bar') &&
-        !objectName.includes('frame');
+        isActualCanvas ||
+        (materialName==='canvas' && !isEaselPart);
 
       const isStructureWood =
-        materialName==='warm oak' ||
-        materialName==='ext dark wood' ||
-        objectName.startsWith('column ') ||
-        objectName.startsWith('roof beam ') ||
-        objectName.includes('rear support') ||
-        objectName.includes('easel');
+        (
+          materialName==='warm oak' ||
+          materialName==='ext dark wood' ||
+          objectName.startsWith('column ') ||
+          objectName.startsWith('roof beam ') ||
+          objectName.includes('rear support') ||
+          isEaselPart
+        ) && !isActualCanvas;
 
       // GLASS: subtle clear greenhouse glass, not a foggy overlay.
       if(isGlass){
@@ -457,14 +467,13 @@ function enhanceMaterials(root){
         mat.transparent=false;
         mat.opacity=1;
         mat.depthWrite=true;
-        mat.depthTest=true;
-        mat.alphaTest=0;
         mat.side=THREE.FrontSide;
 
+        if(mat.color)mat.color.set('#b98252');
         if('transmission' in mat)mat.transmission=0;
-        if('roughness' in mat)mat.roughness=Math.max(mat.roughness ?? 0.45,0.45);
+        if('roughness' in mat)mat.roughness=0.58;
         if('metalness' in mat)mat.metalness=0;
-        if('envMapIntensity' in mat)mat.envMapIntensity=0.28;
+        if('envMapIntensity' in mat)mat.envMapIntensity=0.32;
 
         o.castShadow=true;
         o.receiveShadow=true;
@@ -574,21 +583,27 @@ function keepOnlyFurniture(root){
 }
 
 function keepOnlyFlowers(root){
+  // The dedicated root flower GLB should be shown as exported.
+  // Do not filter child meshes by name; many flower children have generic names.
+  root.traverse(o=>{ o.visible=true; });
+
+  // Match the latest Blender setup: Lower flower decoration stands at -90°.
+  const lowerRoots=[];
   root.traverse(o=>{
-    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    if(!n.includes('lower'))return;
 
-    let cur=o;
-    let keep=false;
-    while(cur && cur!==root){
-      const n=(cur.name||'').toLowerCase();
-      if(n.includes('upper') || n.includes('lower') || n.includes('flower')){
-        keep=true;
-        break;
-      }
-      cur=cur.parent;
+    let p=o.parent;
+    while(p && p!==root){
+      if((p.name||'').toLowerCase().includes('lower'))return;
+      p=p.parent;
     }
+    lowerRoots.push(o);
+  });
 
-    if(o.isMesh)o.visible=keep;
+  lowerRoots.forEach(o=>{
+    o.rotation.x=-Math.PI/2;
+    o.updateMatrixWorld(true);
   });
 }
 
@@ -796,7 +811,7 @@ function placeNPCSeated(npc,seat){
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.root.position.copy(seat.position);
-  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+Math.PI;
+  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION;
   npc.state='seated';
   npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
   playNPC(npc,'Avatar_Sit',0);
@@ -970,7 +985,7 @@ function updateNPCs(dt,now){
       if(distance<.10){
         if(npc.state==='goingToSeat'&&npc.seat){
           npc.root.position.copy(npc.seat.position);
-          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+Math.PI;
+          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+MODEL_YAW_CORRECTION;
           npc.state='seated';
           npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
           npc.target=null;
@@ -1175,7 +1190,7 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         avatarRoot.rotation.y=
-          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+Math.PI;
+          Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION;
         playAvatar('Avatar_Sit');
         status.textContent='스툴에 앉음 · WASD 또는 바닥 클릭으로 일어나기';
       }else{
@@ -1261,17 +1276,11 @@ Promise.all([
     boatMover=boatGLB.scene.getObjectByName('EXT Boat 0') || boatGLB.scene;
 
     if(boatMover){
-      // Stop relying on exported transform animation. Scale the visible boat
-      // once and drive its orbit manually so size/speed/height stay deterministic.
-      const visual=new THREE.Group();
-      visual.name='Boat Visual Scale';
-      const originalChildren=[...boatMover.children];
-      boatMover.add(visual);
-      originalChildren.forEach(child=>visual.add(child));
-
-      visual.scale.setScalar(10);
-      visual.position.y=-2.8;
-      boatMover.userData.visualScaleGroup=visual;
+      // Exact GLB structure: EXT Boat 0 has Bow/Cabin/Hull mesh children.
+      // Scale mesh geometry 10x, but preserve each child's local position.
+      boatMover.children.forEach(child=>{
+        if(child.isMesh)child.scale.multiplyScalar(10);
+      });
 
       boatAngle=0.4;
       boatMover.position.set(
@@ -1284,7 +1293,6 @@ Promise.all([
       boatHasPrev=true;
     }
 
-    // Do not play exported boat animation; manual orbit is used in tick().
     boatMixer=null;
   }
 
