@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v2.1</div>
+  <div id="version">controller v3.0 · NPC seats/collision</div>
 </div>
 
 <script type="importmap">
@@ -36,6 +36,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const loading=document.getElementById('loading');
 const status=document.getElementById('status');
@@ -88,6 +89,22 @@ const avatarActions={};
 let currentAction=null;
 let moveTarget=null;
 
+// NPC atelier residents.
+const npcs=[];
+const seatSlots=[];
+const NPC_COUNT=4;
+const NPC_MIN_DISTANCE=0.78;
+const NPC_HAT_COLORS=[
+  0x9b4c43, // brick
+  0x6d4a91, // violet
+  0xd59c35, // ochre
+  0x4f7659, // green
+  0x356d8c, // blue
+  0x934d60, // wine
+  0xb86f45, // terracotta
+  0x596b9a  // indigo
+];
+
 let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
@@ -95,8 +112,8 @@ let boatPrevPos=new THREE.Vector3();
 let boatHasPrev=false;
 
 // Pavilion controller constants.
-const WALK_RADIUS=5.35;
-const CAMERA_RADIUS=5.85;
+const WALK_RADIUS=8.05;
+const CAMERA_RADIUS=8.55;
 const MOVE_SPEED=1.85;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
 
@@ -349,6 +366,306 @@ function clampXZ(v,radius){
   return v;
 }
 
+function recolorBeret(model,color){
+  model.traverse(o=>{
+    if(!o.isMesh)return;
+    const on=(o.name||'').toLowerCase();
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+
+    mats.forEach((mat,index)=>{
+      if(!mat)return;
+      const mn=(mat.name||'').toLowerCase();
+      if(!(on.includes('beret')||on.includes('hat')||mn.includes('beret')||mn.includes('hat')))return;
+
+      const cloned=mat.clone();
+      if(cloned.color)cloned.color.setHex(color);
+      cloned.needsUpdate=true;
+
+      if(Array.isArray(o.material)){
+        const arr=o.material.slice();
+        arr[index]=cloned;
+        o.material=arr;
+      }else{
+        o.material=cloned;
+      }
+    });
+  });
+}
+
+function collectSeatSlots(furnitureRoot){
+  seatSlots.length=0;
+
+  const stoolRoots=[];
+  furnitureRoot.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    if(!(n.includes('stool_group')||n.startsWith('stool')))return;
+
+    // Keep only the highest stool-labelled object so child meshes are not duplicated.
+    let p=o.parent;
+    while(p){
+      const pn=(p.name||'').toLowerCase();
+      if(pn.includes('stool_group')||pn.startsWith('stool'))return;
+      p=p.parent;
+    }
+    stoolRoots.push(o);
+  });
+
+  const easels=[];
+  furnitureRoot.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    if(!n.startsWith('easel'))return;
+    let p=o.parent;
+    while(p){
+      if((p.name||'').toLowerCase().startsWith('easel'))return;
+      p=p.parent;
+    }
+    const box=new THREE.Box3().setFromObject(o);
+    if(!box.isEmpty())easels.push({o,center:box.getCenter(new THREE.Vector3())});
+  });
+
+  stoolRoots.forEach((stool,index)=>{
+    const box=new THREE.Box3().setFromObject(stool);
+    if(box.isEmpty())return;
+
+    const center=box.getCenter(new THREE.Vector3());
+    let nearest=null;
+    let nearestD=Infinity;
+
+    easels.forEach(e=>{
+      const d=(e.center.x-center.x)**2+(e.center.z-center.z)**2;
+      if(d<nearestD){nearestD=d;nearest=e;}
+    });
+
+    const faceDir=nearest
+      ? new THREE.Vector3(nearest.center.x-center.x,0,nearest.center.z-center.z).normalize()
+      : new THREE.Vector3(-center.x,0,-center.z).normalize();
+
+    // Avatar root stays on the floor; Avatar_Sit provides the seated body pose.
+    const floorY=avatarRoot?.position.y ?? 0;
+    seatSlots.push({
+      index,
+      stool,
+      position:new THREE.Vector3(center.x,floorY,center.z),
+      seatTop:box.max.y,
+      faceDir,
+      occupiedBy:null
+    });
+  });
+
+  seatSlots.sort((a,b)=>Math.atan2(a.position.x,a.position.z)-Math.atan2(b.position.x,b.position.z));
+  console.log('Seat slots:',seatSlots.length,seatSlots.map(s=>[s.position.x.toFixed(2),s.position.z.toFixed(2)]));
+}
+
+function makeNPCActionSet(model,clips){
+  const mixer=new THREE.AnimationMixer(model);
+  const actions={};
+  clips.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
+  return {mixer,actions,current:null};
+}
+
+function playNPC(npc,name,fade=.14){
+  const next=npc.actions[name];
+  if(!next)return;
+
+  if(npc.current===next){
+    if(!next.isRunning())next.reset().play();
+    return;
+  }
+
+  next.enabled=true;
+  next.clampWhenFinished=false;
+  next.setLoop(THREE.LoopRepeat,Infinity);
+  next.reset().play();
+  if(npc.current)npc.current.crossFadeTo(next,fade,false);
+  npc.current=next;
+}
+
+function randomWalkTarget(exceptNPC=null){
+  for(let tries=0;tries<40;tries++){
+    // Keep walkers clear of the center table and the pavilion wall.
+    const radius=THREE.MathUtils.lerp(2.45,7.25,Math.sqrt(Math.random()));
+    const a=Math.random()*Math.PI*2;
+    const p=new THREE.Vector3(Math.sin(a)*radius,0,Math.cos(a)*radius);
+
+    let blocked=false;
+    for(const n of npcs){
+      if(n===exceptNPC)continue;
+      if(n.root.position.distanceTo(p)<1.25){blocked=true;break;}
+    }
+    if(!blocked&&avatarRoot&&avatarRoot.position.distanceTo(p)<1.1)blocked=true;
+    if(!blocked)return p;
+  }
+  return new THREE.Vector3(3.2,0,0);
+}
+
+function releaseSeat(npc){
+  if(npc.seat){
+    if(npc.seat.occupiedBy===npc)npc.seat.occupiedBy=null;
+    npc.seat=null;
+  }
+}
+
+function reserveRandomSeat(npc){
+  const free=seatSlots.filter(s=>!s.occupiedBy);
+  if(!free.length)return false;
+  const seat=free[Math.floor(Math.random()*free.length)];
+  seat.occupiedBy=npc;
+  npc.seat=seat;
+  npc.target=seat.position.clone();
+  npc.state='goingToSeat';
+  playNPC(npc,'Avatar_Walk');
+  return true;
+}
+
+function placeNPCSeated(npc,seat){
+  seat.occupiedBy=npc;
+  npc.seat=seat;
+  npc.root.position.copy(seat.position);
+  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION;
+  npc.state='seated';
+  npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
+  playNPC(npc,'Avatar_Sit',0);
+}
+
+function spawnNPCs(baseModel,clips,count=NPC_COUNT){
+  npcs.splice(0,npcs.length);
+
+  for(let i=0;i<count;i++){
+    const root=new THREE.Group();
+    const model=SkeletonUtils.clone(baseModel);
+    root.add(model);
+
+    const {mixer,actions,current}=makeNPCActionSet(model,clips);
+    const npc={
+      id:i,
+      root,
+      model,
+      mixer,
+      actions,
+      current,
+      state:'idle',
+      stateUntil:0,
+      target:null,
+      seat:null,
+      speed:THREE.MathUtils.randFloat(1.0,1.45)
+    };
+
+    const color=NPC_HAT_COLORS[i%NPC_HAT_COLORS.length];
+    recolorBeret(model,color);
+
+    root.position.copy(randomWalkTarget(npc));
+    scene.add(root);
+    npcs.push(npc);
+    playNPC(npc,'Avatar_Idle',0);
+  }
+
+  // Make the room immediately feel occupied: two residents begin seated,
+  // the rest start at separated roaming locations.
+  const freeSeats=seatSlots.slice();
+  for(let i=0;i<Math.min(2,npcs.length,freeSeats.length);i++){
+    const idx=Math.floor(Math.random()*freeSeats.length);
+    const seat=freeSeats.splice(idx,1)[0];
+    placeNPCSeated(npcs[i],seat);
+  }
+
+  for(let i=2;i<npcs.length;i++){
+    npcs[i].target=randomWalkTarget(npcs[i]);
+    npcs[i].state='walking';
+    playNPC(npcs[i],'Avatar_Walk',0);
+  }
+}
+
+function npcCandidateBlocked(npc,candidate,minDistance=NPC_MIN_DISTANCE){
+  if(avatarRoot&&avatarRoot.position.distanceTo(candidate)<minDistance)return true;
+
+  for(const other of npcs){
+    if(other===npc)continue;
+    if(other.root.position.distanceTo(candidate)<minDistance)return true;
+  }
+  return false;
+}
+
+function playerCandidateBlocked(candidate,minDistance=.64){
+  return npcs.some(n=>n.root.position.distanceTo(candidate)<minDistance);
+}
+
+function updateNPCs(dt,now){
+  for(const npc of npcs){
+    npc.mixer.update(dt);
+
+    if(npc.state==='seated'){
+      if(now>=npc.stateUntil){
+        releaseSeat(npc);
+        npc.state='idle';
+        npc.stateUntil=now+THREE.MathUtils.randFloat(1.5,4.0);
+        playNPC(npc,'Avatar_Idle');
+      }
+      continue;
+    }
+
+    if(npc.state==='idle'){
+      if(now>=npc.stateUntil){
+        if(Math.random()<0.48&&seatSlots.length&&reserveRandomSeat(npc)){
+          // seat reserved; walk to it
+        }else{
+          npc.target=randomWalkTarget(npc);
+          npc.state='walking';
+          playNPC(npc,'Avatar_Walk');
+        }
+      }
+      continue;
+    }
+
+    if(npc.state==='walking'||npc.state==='goingToSeat'){
+      if(!npc.target){
+        npc.state='idle';
+        npc.stateUntil=now+2;
+        playNPC(npc,'Avatar_Idle');
+        continue;
+      }
+
+      const dir=npc.target.clone().sub(npc.root.position);
+      dir.y=0;
+      const distance=dir.length();
+
+      if(distance<.10){
+        if(npc.state==='goingToSeat'&&npc.seat){
+          npc.root.position.copy(npc.seat.position);
+          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+MODEL_YAW_CORRECTION;
+          npc.state='seated';
+          npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
+          npc.target=null;
+          playNPC(npc,'Avatar_Sit');
+        }else{
+          npc.state='idle';
+          npc.stateUntil=now+THREE.MathUtils.randFloat(1.5,5.0);
+          npc.target=null;
+          playNPC(npc,'Avatar_Idle');
+        }
+        continue;
+      }
+
+      dir.normalize();
+      const step=Math.min(npc.speed*dt,distance);
+      const candidate=npc.root.position.clone().addScaledVector(dir,step);
+
+      if(npcCandidateBlocked(npc,candidate)){
+        if(npc.state==='goingToSeat'){
+          // Give way briefly instead of abandoning a reserved seat.
+          playNPC(npc,'Avatar_Idle');
+        }else{
+          npc.target=randomWalkTarget(npc);
+        }
+        continue;
+      }
+
+      npc.root.position.copy(candidate);
+      npc.root.rotation.y=Math.atan2(dir.x,dir.z)+MODEL_YAW_CORRECTION;
+      playNPC(npc,'Avatar_Walk');
+    }
+  }
+}
+
 function updateCamera(){
   if(!avatarRoot)return;
 
@@ -526,8 +843,15 @@ function updateMovement(dt){
 
   const next=avatarRoot.position.clone().addScaledVector(dir,step);
   clampXZ(next,WALK_RADIUS);
-  avatarRoot.position.copy(next);
 
+  // Do not let the player walk through residents.
+  if(playerCandidateBlocked(next)){
+    if(moveTarget)moveTarget=null;
+    playAvatar('Avatar_Idle');
+    return;
+  }
+
+  avatarRoot.position.copy(next);
   playAvatar('Avatar_Walk');
 }
 
@@ -599,6 +923,11 @@ Promise.all([
 
   playAvatar('Avatar_Idle',0);
 
+  // Build real stool seat anchors from the uploaded furniture GLB,
+  // then create independent residents from the same rigged avatar.
+  if(furnitureGLB)collectSeatSlots(furnitureGLB.scene);
+  spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
+
   cameraFocus.set(
     avatarRoot.position.x,
     avatarRoot.position.y+1.15,
@@ -643,6 +972,7 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
 
   if(avatarMixer)avatarMixer.update(dt);
+  updateNPCs(dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
   if(boatMixer){
     boatMixer.update(dt);
