@@ -1112,10 +1112,8 @@ Promise.all([
     if(boatMover){
       // Scale the visible boat descendants directly because the animated root
       // itself carries transform tracks that can overwrite its scale.
-      boatMover.traverse(child=>{
-        if(child!==boatMover && child.isObject3D){
-          child.scale.multiplyScalar(10);
-        }
+      boatMover.children.forEach(child=>{
+        child.scale.multiplyScalar(10);
       });
       boatMover.position.y-=7.2;
       boatMover.getWorldPosition(boatPrevPos);
