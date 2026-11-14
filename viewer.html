@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.1 · visual polish + giant slow boat</div>
+  <div id="version">controller v3.2 · restored light + water/camera/boat fix</div>
 </div>
 
 <script type="importmap">
@@ -42,10 +42,9 @@ const loading=document.getElementById('loading');
 const status=document.getElementById('status');
 
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xa9bcc9);
-scene.fog=new THREE.FogExp2(0xa9bcc9,0.012);
+scene.background=new THREE.Color(0xd8e6ee);
 
-const camera=new THREE.PerspectiveCamera(46,innerWidth/innerHeight,.05,200);
+const camera=new THREE.PerspectiveCamera(39,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -54,17 +53,17 @@ renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.02;
+renderer.toneMappingExposure=.92;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const pmrem=new THREE.PMREMGenerator(renderer);
-scene.environment=pmrem.fromScene(new RoomEnvironment(),.05).texture;
-scene.environmentIntensity=.62;
+scene.environment=pmrem.fromScene(new RoomEnvironment(),.04).texture;
+scene.environmentIntensity=.38;
 
-scene.add(new THREE.HemisphereLight(0xfff1de,0x66798b,1.22));
+scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,1.08));
 
-const sun=new THREE.DirectionalLight(0xffd6ad,1.95);
-sun.position.set(-10,12,-5);
+const sun=new THREE.DirectionalLight(0xffddb5,1.72);
+sun.position.set(-8,10,-4);
 sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
 sun.shadow.camera.near=.5;
@@ -76,8 +75,8 @@ sun.shadow.camera.bottom=-9;
 sun.shadow.bias=-.00035;
 scene.add(sun);
 
-const fill=new THREE.DirectionalLight(0xcfe0ff,.50);
-fill.position.set(8,6,7);
+const fill=new THREE.DirectionalLight(0xc6ddff,.35);
+fill.position.set(6,5,5);
 scene.add(fill);
 
 const loader=new GLTFLoader();
@@ -121,7 +120,7 @@ const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF fr
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
 let camPitch=.92;
-let camDistance=4.8;
+let camDistance=4.25;
 let camTarget=new THREE.Vector3(0,1.05,-1.8);
 let cameraFocus=new THREE.Vector3(0,1.05,-1.8);
 
@@ -264,7 +263,9 @@ function enhanceMaterials(root){
 
       const isWater =
         materialName==='ext water' ||
-        objectName==='ext water surface';
+        objectName==='ext water surface' ||
+        materialName.includes('water') ||
+        objectName.includes('water');
 
       const isFoliage =
         objectName.includes('leaf') ||
@@ -330,25 +331,25 @@ function enhanceMaterials(root){
       if(isWater){
         const water=new THREE.MeshPhysicalMaterial({
           name:'Atelier Water',
-          color:new THREE.Color('#2f8fa6'),
+          color:new THREE.Color('#4f9eb4'),
           transparent:true,
-          opacity:0.94,
-          roughness:0.10,
-          metalness:0.02,
-          transmission:0.05,
+          opacity:0.98,
+          roughness:0.06,
+          metalness:0.03,
+          transmission:0.02,
           ior:1.333,
-          thickness:0.18,
+          thickness:0.12,
           clearcoat:1,
-          clearcoatRoughness:0.07,
-          envMapIntensity:2.0,
+          clearcoatRoughness:0.035,
+          envMapIntensity:2.4,
           normalMap:atelierWaterNormal.clone(),
-          normalScale:new THREE.Vector2(0.32,0.32),
+          normalScale:new THREE.Vector2(0.95,0.95),
           side:THREE.DoubleSide,
           depthWrite:true,
           depthTest:true
         });
         water.normalMap.wrapS=water.normalMap.wrapT=THREE.RepeatWrapping;
-        water.normalMap.repeat.set(7,7);
+        water.normalMap.repeat.set(4,4);
 
         if(Array.isArray(o.material)){
           o.material[index]=water;
@@ -464,9 +465,9 @@ function correctBoatClip(sourceClip){
 
     const values=track.values;
     for(let i=0;i<values.length;i+=3){
-      values[i]   *= 3.15;
-      values[i+1] -= 1.05;
-      values[i+2] *= 3.15;
+      values[i]   *= 2.25;
+      values[i+1] -= 1.40;
+      values[i+2] *= 2.25;
     }
   }
 
@@ -1010,7 +1011,6 @@ Promise.all([
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   enhanceMaterials(envGLB.scene);
   scene.add(envGLB.scene);
-  addLanternGlow(envGLB.scene);
 
   if(envGLB.animations?.length){
     envMixer=new THREE.AnimationMixer(envGLB.scene);
@@ -1029,7 +1029,6 @@ Promise.all([
   if(flowerGLB){
     enhanceMaterials(flowerGLB.scene);
     scene.add(flowerGLB.scene);
-    addLanternGlow(flowerGLB.scene);
   }
 
   if(boatGLB){
@@ -1041,15 +1040,15 @@ Promise.all([
       // Scale the actual animated boat, not the GLB scene root,
       // so the travel path itself is not multiplied by ten.
       boatMover.scale.multiplyScalar(10);
-      boatMover.position.y-=0.45;
+      boatMover.position.y-=4.8;
       boatMover.getWorldPosition(boatPrevPos);
       boatHasPrev=true;
     }
 
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
-      // Previous speed was 1/3. User requested another 10x slowdown.
-      boatMixer.timeScale=1/30;
+      // Keep it clearly slower than before, but not almost frozen.
+      boatMixer.timeScale=1/8;
       boatGLB.animations.forEach(sourceClip=>{
         const clip=correctBoatClip(sourceClip);
         const a=boatMixer.clipAction(clip);
@@ -1137,10 +1136,14 @@ function tick(){
     const waterMaterial=o.userData?.waterMaterial;
     if(!waterMaterial?.normalMap)return;
 
-    waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.020)%1;
-    waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.011)%1;
+    waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.050)%1;
+    waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.028)%1;
+    waterMaterial.normalScale.set(
+      0.90+Math.sin(performance.now()*0.0017)*0.12,
+      0.96+Math.cos(performance.now()*0.0013)*0.12
+    );
     waterMaterial.clearcoatRoughness=
-      0.065+Math.sin(performance.now()*0.0013)*0.012;
+      0.035+Math.sin(performance.now()*0.0015)*0.01;
   });
 
   updateMovement(dt);
