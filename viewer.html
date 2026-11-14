@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v3.4 · latest GLB + camera/movement/boat wrapper</div>
+  <div id="version">controller v3.5 · current furniture + reliable stool + unique hats</div>
 </div>
 
 <script type="importmap">
@@ -98,15 +98,23 @@ const seatSlots=[];
 const NPC_COUNT=4;
 const NPC_MIN_DISTANCE=0.78;
 const NPC_HAT_COLORS=[
-  0x9b4c43, // brick
-  0x6d4a91, // violet
-  0xd59c35, // ochre
-  0x4f7659, // green
-  0x356d8c, // blue
-  0x934d60, // wine
-  0xb86f45, // terracotta
-  0x596b9a  // indigo
+  0xd84f5f, // red
+  0xf28b30, // orange
+  0xe3bf2f, // mustard
+  0x4f9b57, // green
+  0x2f9c95, // teal
+  0x3677b8, // blue
+  0x5454a8, // indigo
+  0x8454b3, // violet
+  0xb34e8c, // magenta
+  0x7c5337  // brown
 ];
+
+const hatColorPool=[...NPC_HAT_COLORS];
+for(let i=hatColorPool.length-1;i>0;i--){
+  const j=Math.floor(Math.random()*(i+1));
+  [hatColorPool[i],hatColorPool[j]]=[hatColorPool[j],hatColorPool[i]];
+}
 
 let envMixer=null;
 let boatMixer=null;
@@ -539,6 +547,39 @@ function recolorBeret(model,color){
   });
 }
 
+function keepFurnitureInsidePavilion(furnitureRoot){
+  const roots=[];
+
+  furnitureRoot.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    const isCandidate=n.startsWith('easel') || n.includes('stool_group') || n.startsWith('stool');
+    if(!isCandidate)return;
+
+    let p=o.parent;
+    while(p && p!==furnitureRoot){
+      const pn=(p.name||'').toLowerCase();
+      if(pn.startsWith('easel') || pn.includes('stool_group') || pn.startsWith('stool'))return;
+      p=p.parent;
+    }
+    roots.push(o);
+  });
+
+  roots.forEach(root=>{
+    const box=new THREE.Box3().setFromObject(root);
+    if(box.isEmpty())return;
+    const center=box.getCenter(new THREE.Vector3());
+    const r=Math.hypot(center.x,center.z);
+    const maxR=7.55;
+
+    if(r>maxR){
+      const target=center.clone().multiplyScalar(maxR/r);
+      const delta=new THREE.Vector3(target.x-center.x,0,target.z-center.z);
+      root.position.add(delta);
+      root.updateMatrixWorld(true);
+    }
+  });
+}
+
 function collectSeatSlots(furnitureRoot){
   seatSlots.length=0;
 
@@ -592,10 +633,15 @@ function collectSeatSlots(furnitureRoot){
     const seat={
       index,
       stool,
-      position:new THREE.Vector3(center.x,floorY,center.z),
+      position:new THREE.Vector3(
+        center.x-faceDir.x*0.08,
+        floorY,
+        center.z-faceDir.z*0.08
+      ),
       seatTop:box.max.y,
       faceDir,
-      occupiedBy:null
+      occupiedBy:null,
+      clickRadius:0.95
     };
 
     // Mark every visible stool child so raycast clicks can resolve back to this seat.
@@ -705,10 +751,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
       speed:THREE.MathUtils.randFloat(1.0,1.45)
     };
 
-    // Shuffle-like random pick without repeating a hat color in this room.
-    const usedColors=new Set(npcs.map(n=>n.hatColor));
-    const availableColors=NPC_HAT_COLORS.filter(color=>!usedColors.has(color));
-    const color=(availableColors.length?availableColors:NPC_HAT_COLORS)[Math.floor(Math.random()*(availableColors.length||NPC_HAT_COLORS.length))];
+    const color=hatColorPool[(i+1)%hatColorPool.length];
     npc.hatColor=color;
     recolorBeret(model,color);
 
@@ -763,32 +806,51 @@ function releasePlayerSeat(){
   pendingPlayerSeat=null;
 }
 
-function trySitOnClickedStool(){
-  if(!furnitureScene)return false;
+function requestPlayerSeat(seat){
+  if(!seat)return false;
 
+  if(seat.occupiedBy && seat.occupiedBy!=='player'){
+    status.textContent='이미 누가 앉아 있는 스툴이에요';
+    return true;
+  }
+
+  releasePlayerSeat();
+  seat.occupiedBy='player';
+  pendingPlayerSeat=seat;
+  moveTarget=seat.position.clone();
+  playAvatar('Avatar_Walk');
+  status.textContent='스툴로 이동 중';
+  return true;
+}
+
+function trySitOnClickedStool(){
+  if(!furnitureScene || !seatSlots.length)return false;
+
+  // 1) Exact mesh hit.
   const hits=raycaster.intersectObject(furnitureScene,true);
   for(const hit of hits){
     let o=hit.object;
-    let seat=null;
     while(o){
-      if(o.userData?.seatSlot){seat=o.userData.seatSlot;break;}
+      if(o.userData?.seatSlot)return requestPlayerSeat(o.userData.seatSlot);
       o=o.parent;
     }
-    if(!seat)continue;
-
-    if(seat.occupiedBy && seat.occupiedBy!=='player'){
-      status.textContent='이미 누가 앉아 있는 스툴이에요';
-      return true;
-    }
-
-    releasePlayerSeat();
-    seat.occupiedBy='player';
-    pendingPlayerSeat=seat;
-    moveTarget=seat.position.clone();
-    playAvatar('Avatar_Walk');
-    status.textContent='스툴로 이동 중';
-    return true;
   }
+
+  // 2) Wide ground-proximity fallback so clicking the seat is forgiving.
+  const groundHit=new THREE.Vector3();
+  if(raycaster.ray.intersectPlane(groundPlane,groundHit)){
+    let nearest=null;
+    let best=Infinity;
+    for(const seat of seatSlots){
+      const d=Math.hypot(groundHit.x-seat.position.x,groundHit.z-seat.position.z);
+      if(d<seat.clickRadius && d<best){
+        best=d;
+        nearest=seat;
+      }
+    }
+    if(nearest)return requestPlayerSeat(nearest);
+  }
+
   return false;
 }
 
@@ -1081,10 +1143,10 @@ function updateMovement(dt){
 }
 
 Promise.all([
-  loadGLB('./atelier_environment_web.glb'),
+  loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./atelier_upper_lower_flower.glb').catch(()=>null),
+  Promise.resolve(null), // flower export in repo is invalid/duplicated; wait for corrected GLB
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   // Any boat geometry baked into the environment is a stale duplicate.
@@ -1108,11 +1170,14 @@ Promise.all([
     furnitureScene=furnitureGLB.scene;
     enhanceMaterials(furnitureGLB.scene);
     scene.add(furnitureGLB.scene);
+    keepFurnitureInsidePavilion(furnitureGLB.scene);
   }
 
   if(flowerGLB){
     enhanceMaterials(flowerGLB.scene);
     scene.add(flowerGLB.scene);
+  }else{
+    console.warn('Flower GLB disabled: models flower file duplicates furniture blob; corrected flower export needed.');
   }
 
   if(boatGLB){
@@ -1164,6 +1229,7 @@ Promise.all([
     avatarActions[clip.name]=avatarMixer.clipAction(clip);
   });
 
+  recolorBeret(avatarModel,hatColorPool[0]);
   playAvatar('Avatar_Idle',0);
 
   // Build real stool seat anchors from the uploaded furniture GLB,
