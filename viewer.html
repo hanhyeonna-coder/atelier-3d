@@ -11,6 +11,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #hud{position:fixed;left:16px;top:16px;z-index:10;padding:10px 13px;border-radius:14px;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.1);pointer-events:none}
 #hud b{display:block;margin-bottom:5px}
 #version{opacity:.45;font-size:10px;margin-top:4px}
+#artModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:30}
+#artModal.show{display:flex}
+#artCard{position:relative;max-width:min(86vw,900px);max-height:84vh;padding:18px;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
+#artCard img{display:block;max-width:82vw;max-height:72vh;object-fit:contain;border-radius:10px;background:#f7f4ed}
+#artMeta{margin-top:10px;font-size:13px;color:#4b3a30;text-align:center}
+#artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -21,9 +27,16 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v5.3 · artwork owner can re-enter locked easel</div>
+  <div id="version">controller v5.4 · clickable upload prompt + artwork preview</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
+<div id="artModal">
+  <div id="artCard">
+    <button id="artClose" aria-label="닫기">×</button>
+    <img id="artPreview" alt="작품 크게 보기"/>
+    <div id="artMeta"></div>
+  </div>
+</div>
 
 <script type="importmap">
 {
@@ -44,6 +57,10 @@ const loading=document.getElementById('loading');
 const status=document.getElementById('status');
 const workTimer=document.getElementById('workTimer');
 const artUpload=document.getElementById('artUpload');
+const artModal=document.getElementById('artModal');
+const artPreview=document.getElementById('artPreview');
+const artMeta=document.getElementById('artMeta');
+const artClose=document.getElementById('artClose');
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
@@ -1087,6 +1104,42 @@ function getCanvasMeshesForSeat(seat){
   return meshes;
 }
 
+function getSeatArtworkDataUrl(seat){
+  if(!seat)return null;
+  if(savedArtworkSeatIndex===seat.index && savedArtworkDataUrl)return savedArtworkDataUrl;
+
+  const canvases=getCanvasMeshesForSeat(seat);
+  for(const mesh of canvases){
+    const overlay=mesh.getObjectByName('Artwork Overlay');
+    const image=overlay?.material?.map?.image;
+    if(image?.toDataURL){
+      try{return image.toDataURL('image/png');}catch{}
+    }
+  }
+  return null;
+}
+
+function openArtworkPreview(seat){
+  const src=getSeatArtworkDataUrl(seat);
+  if(!src)return false;
+  artPreview.src=src;
+  artMeta.textContent=seat===playerArtworkSeat
+    ? `내 작품 · 작업시간 ${formatDuration(workElapsedSeconds)}`
+    : '아틀리에 작품';
+  artModal.classList.add('show');
+  return true;
+}
+
+function closeArtworkPreview(){
+  artModal.classList.remove('show');
+  artPreview.removeAttribute('src');
+}
+
+artClose.addEventListener('click',closeArtworkPreview);
+artModal.addEventListener('click',e=>{
+  if(e.target===artModal)closeArtworkPreview();
+});
+
 function openArtworkPickerForSeat(seat){
   if(!playerSeat || seat!==playerSeat){
     status.textContent='이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요';
@@ -1490,6 +1543,37 @@ function updateCamera(){
   camera.lookAt(camTarget);
 }
 
+function tryClickWorkPrompt(){
+  if(!playerSeat || !workPromptSprite?.visible)return false;
+  const hits=raycaster.intersectObject(workPromptSprite,false);
+  if(!hits.length)return false;
+  openArtworkPickerForSeat(playerSeat);
+  return true;
+}
+
+function tryPreviewClickedArtwork(){
+  if(!furnitureScene)return false;
+  const hits=raycaster.intersectObject(furnitureScene,true);
+  for(const hit of hits){
+    let seat=null;
+    let p=hit.object;
+    while(p){
+      if(p.userData?.seatSlot){seat=p.userData.seatSlot;break;}
+      p=p.parent;
+    }
+    if(!seat)continue;
+
+    let q=hit.object;
+    while(q){
+      if(q.name==='Artwork Overlay'){
+        return openArtworkPreview(seat);
+      }
+      q=q.parent;
+    }
+  }
+  return false;
+}
+
 function setClickTarget(clientX,clientY){
   if(!avatarRoot)return;
 
@@ -1499,7 +1583,13 @@ function setClickTarget(clientX,clientY){
 
   raycaster.setFromCamera(pointer,camera);
 
-  // While seated, clicking the active canvas opens artwork upload.
+  // Prompt itself is clickable and opens the same upload picker.
+  if(tryClickWorkPrompt())return;
+
+  // Existing artwork can be opened large.
+  if(tryPreviewClickedArtwork())return;
+
+  // While seated, clicking the active canvas still opens artwork upload.
   if(tryOpenArtworkOnClickedCanvas())return;
 
   // Stool/easel gets priority over the floor: click either to walk there and sit.
@@ -1657,10 +1747,14 @@ function updateWorkPrompt(){
     return;
   }
 
-  const idx=Math.floor(performance.now()/3500)%WORK_PROMPTS.length;
-  if(idx!==workPromptIndex){
-    workPromptIndex=idx;
-    drawWorkPrompt(WORK_PROMPTS[idx]);
+  const prompts = (playerArtworkSeat===playerSeat)
+    ? ['작업 중...','그림 바꾸기']
+    : WORK_PROMPTS;
+  const idx=Math.floor(performance.now()/3500)%prompts.length;
+  const promptKey=idx+'|'+prompts[idx];
+  if(promptKey!==workPromptIndex){
+    workPromptIndex=promptKey;
+    drawWorkPrompt(prompts[idx]);
   }
 
   const box=new THREE.Box3().setFromObject(playerSeat.easel);
