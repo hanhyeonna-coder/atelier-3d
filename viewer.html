@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.9 · remove embedded avatar mesh duplicates</div>
+  <div id="version">controller v7.0 · nearby-name hysteresis</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -1299,14 +1299,27 @@ function broadcastMotion(force=false){
 
 function updateProximityNameLabels(){
   if(!avatarRoot)return;
-  const threshold=2.4;
+
+  const showDistance=3.6;
+  const hideDistance=4.2;
+
   for(const entry of remoteAvatars.values()){
     const label=entry.root.getObjectByName('Player Name Label');
     if(!label)continue;
-    const d=entry.root.position.distanceTo(avatarRoot.position);
-    label.visible=d<=threshold;
+
+    // Use floor-plane distance only so vertical offsets never suppress the tag.
+    const dx=entry.root.position.x-avatarRoot.position.x;
+    const dz=entry.root.position.z-avatarRoot.position.z;
+    const d=Math.hypot(dx,dz);
+
+    if(label.visible){
+      if(d>hideDistance)label.visible=false;
+    }else{
+      if(d<=showDistance)label.visible=true;
+    }
   }
 
+  // Never show my own name to myself.
   const ownLabel=avatarRoot.getObjectByName('Player Name Label');
   if(ownLabel)ownLabel.visible=false;
 }
