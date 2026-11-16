@@ -10,11 +10,14 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:700;color:#4b3a30}
 #hud{position:fixed;left:16px;top:16px;z-index:10;padding:10px 13px;border-radius:14px;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.1);pointer-events:none}
 #hud b{display:block;margin-bottom:5px}
-#version{opacity:.45;font-size:10px;margin-top:4px}
-#artModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:30}
+#timerPanel{position:fixed;right:18px;top:18px;z-index:11;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,.9);backdrop-filter:blur(10px);font-weight:800;font-size:14px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.12);pointer-events:none}
+#statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
+#statusToast.show{opacity:1}
+#version{opacity:.38;font-size:10px;margin-top:4px}
+#artModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:30;padding:24px;box-sizing:border-box}
 #artModal.show{display:flex}
-#artCard{position:relative;max-width:min(86vw,900px);max-height:84vh;padding:18px;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
-#artCard img{display:block;max-width:82vw;max-height:72vh;object-fit:contain;border-radius:10px;background:#f7f4ed}
+#artCard{position:relative;width:min(78vw,920px);max-height:78vh;padding:18px;box-sizing:border-box;overflow:hidden;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
+#artCard img{display:block;width:auto;height:auto;max-width:100%;max-height:64vh;margin:0 auto;object-fit:contain;border-radius:10px;background:#f7f4ed}
 #artMeta{margin-top:10px;font-size:13px;color:#4b3a30;text-align:center}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 </style>
@@ -25,10 +28,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="status">불러오는 중</div>
-  <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v6.0 · Supabase realtime multiplayer MVP</div>
+  <div id="version">controller v6.1 · multiplayer lock + HUD cleanup</div>
 </div>
+<div id="timerPanel"><span id="workTimer">오늘 00:00 · 누적 00:00</span></div>
+<div id="statusToast"></div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
   <div id="artCard">
@@ -56,13 +59,20 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {createClient} from '@supabase/supabase-js';
 
 const loading=document.getElementById('loading');
-const status=document.getElementById('status');
+const status=document.getElementById('statusToast');
 const workTimer=document.getElementById('workTimer');
 const artUpload=document.getElementById('artUpload');
 const artModal=document.getElementById('artModal');
 const artPreview=document.getElementById('artPreview');
 const artMeta=document.getElementById('artMeta');
 const artClose=document.getElementById('artClose');
+let statusHideTimer=null;
+function showStatus(message,ms=2200){
+  showStatus(message);
+  status.classList.add('show');
+  clearTimeout(statusHideTimer);
+  statusHideTimer=setTimeout(()=>status.classList.remove('show'),ms);
+}
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
@@ -577,7 +587,7 @@ function playAvatar(name,fade=.12){
 
   if(currentAction)currentAction.crossFadeTo(next,fade,false);
   currentAction=next;
-  status.textContent=name;
+  showStatus(name);
 }
 
 function setAvatarFacing(dir){
@@ -1048,12 +1058,21 @@ function clearServerArtworkVisuals(){
 
 function applyServerArtworks(rows){
   clearServerArtworkVisuals();
+
+  for(const seat of seatSlots){
+    seat.serverArtworkOwner=null;
+    if(!seat.userData)seat.userData={};
+  }
+
   for(const row of rows){
     const seat=seatSlots.find(s=>s.index===row.seat_index);
-    if(!seat || row.owner_id===clientId)continue;
+    if(!seat)continue;
+
     seat.serverArtworkOwner=row.owner_id;
     seat.artworkLockedUntil=row.locked_until?new Date(row.locked_until).getTime():0;
-    seat.userData=seat.userData||{};
+
+    if(row.owner_id===clientId)continue;
+
     seat.userData.artworkDataUrl=row.image_url;
     seat.userData.artworkMeta=(row.display_name||'Painter')+' · 작업 '+Math.max(1,Math.round((row.work_seconds||0)/60))+'분';
     const img=new Image();
@@ -1403,13 +1422,18 @@ artModal.addEventListener('click',e=>{
 
 function openArtworkPickerForSeat(seat){
   if(!playerSeat || seat!==playerSeat){
-    status.textContent='이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요';
+    showStatus('이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요');
+    return true;
+  }
+
+  if(seat.serverArtworkOwner && seat.serverArtworkOwner!==clientId){
+    showStatus('다른 사람의 작품은 수정할 수 없어요');
     return true;
   }
 
   const canvases=getCanvasMeshesForSeat(seat);
   if(!canvases.length){
-    status.textContent='이 이젤의 캔버스 메시를 찾지 못했어요';
+    showStatus('이 이젤의 캔버스 메시를 찾지 못했어요');
     return true;
   }
 
@@ -1573,7 +1597,7 @@ function applyArtworkImage(img){
 
   const canvases=getCanvasMeshesForSeat(playerSeat);
   if(!canvases.length){
-    status.textContent='캔버스 메시를 찾지 못했어요';
+    showStatus('캔버스 메시를 찾지 못했어요');
     return;
   }
 
@@ -1588,7 +1612,7 @@ function applyArtworkImage(img){
   playerSeat.artworkLockedUntil=0;
   saveProgress();
   syncArtworkToServer();
-  status.textContent='작품이 저장됐어요';
+  showStatus('작품이 저장됐어요');
 }
 
 artUpload.addEventListener('change',()=>{
@@ -1603,28 +1627,39 @@ artUpload.addEventListener('change',()=>{
   };
   img.onerror=()=>{
     URL.revokeObjectURL(url);
-    status.textContent='이미지를 불러오지 못했어요';
+    showStatus('이미지를 불러오지 못했어요');
   };
   img.src=url;
 });
+
+function isMyArtworkSeat(seat){
+  return !!seat && (
+    seat.serverArtworkOwner===clientId ||
+    (seat.serverArtworkOwner==null && savedArtworkSeatIndex===seat.index && playerArtworkSeat===seat)
+  );
+}
 
 async function requestPlayerSeat(seat){
   if(!seat)return false;
 
   if(seat.serverOccupant && seat.serverOccupant!==clientId){
-    status.textContent='지금 다른 사람이 앉아 있어요';
+    showStatus('지금 다른 사람이 앉아 있어요');
     return true;
   }
 
-  if(isArtworkLocked(seat) && savedArtworkSeatIndex!==seat.index){
-    status.textContent=`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`;
+  if(isArtworkLocked(seat) && !isMyArtworkSeat(seat)){
+    showStatus(`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`,3000);
     return true;
   }
 
-  // The owner can return to their own displayed artwork immediately.
-  if(isArtworkLocked(seat) && savedArtworkSeatIndex===seat.index){
+  // Only the actual artwork owner may reopen a locked easel immediately.
+  if(isArtworkLocked(seat) && isMyArtworkSeat(seat)){
     seat.artworkLockedUntil=0;
     savedArtworkLockedUntil=0;
+    supabase.from('atelier_artworks')
+      .update({locked_until:null,updated_at:new Date().toISOString()})
+      .eq('owner_id',clientId)
+      .eq('seat_index',seat.index);
     saveProgress();
   }
 
@@ -1638,7 +1673,7 @@ async function requestPlayerSeat(seat){
       playNPC(npc,'Avatar_Walk');
       seat.occupiedBy=null;
     }else{
-      status.textContent='지금 다른 사람이 앉아 있어요';
+      showStatus('지금 다른 사람이 앉아 있어요');
       return true;
     }
   }
@@ -1648,7 +1683,7 @@ async function requestPlayerSeat(seat){
 
   const claimed=await serverClaimSeat(seat);
   if(!claimed){
-    status.textContent='방금 다른 사람이 먼저 앉았어요';
+    showStatus('방금 다른 사람이 먼저 앉았어요');
     return true;
   }
 
@@ -1656,7 +1691,7 @@ async function requestPlayerSeat(seat){
   pendingPlayerSeat=seat;
   moveTarget=seat.position.clone();
   playAvatar('Avatar_Walk');
-  status.textContent='스툴로 이동 중';
+  showStatus('스툴로 이동 중');
   return true;
 }
 
@@ -1874,19 +1909,19 @@ function setClickTarget(clientX,clientY){
   if(!raycaster.ray.intersectPlane(groundPlane,hit))return;
 
   if(Math.hypot(hit.x,hit.z)>WALK_RADIUS){
-    status.textContent='파빌리온 안쪽 바닥을 클릭해 주세요';
+    showStatus('파빌리온 안쪽 바닥을 클릭해 주세요');
     return;
   }
 
   if(isInsideCenterBlock(hit,.14)){
-    status.textContent='중앙 작업대는 지나갈 수 없어요';
+    showStatus('중앙 작업대는 지나갈 수 없어요');
     return;
   }
 
   releasePlayerSeat();
   moveTarget=new THREE.Vector3(hit.x,avatarRoot.position.y,hit.z);
   playAvatar('Avatar_Walk');
-  status.textContent='이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1);
+  showStatus('이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
 }
 
 renderer.domElement.addEventListener('pointerdown',e=>{
@@ -2103,7 +2138,7 @@ function updateMovement(dt){
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-        status.textContent='내 이젤에서 작업 중 · 일어나면 타이머 일시정지';
+        showStatus('내 이젤에서 작업 중 · 일어나면 타이머 일시정지');
       }else{
         playAvatar('Avatar_Idle');
       }
@@ -2280,11 +2315,11 @@ Promise.all([
   updateCamera();
 
   loading.style.display='none';
-  status.textContent='빈 이젤에 앉으면 그 자리가 내 이젤이 됩니다';
+  showStatus('빈 이젤에 앉으면 그 자리가 내 이젤이 됩니다');
 }).catch(err=>{
   console.error(err);
   loading.textContent='GLB 로드 실패';
-  status.textContent=String(err);
+  showStatus(String(err));
 });
 
 function updateBoatMotion(dt){
