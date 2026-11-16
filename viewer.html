@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.5 · slow aligned boat + outdoor snow + denser clouds</div>
+  <div id="version">controller v8.6 · very slow boat + ring clouds + ghost cleanup</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -316,8 +316,8 @@ let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
 let extEnvMixer=null;
-const BOAT_ANIM_SPEED=.18;
-const BOAT_FACING_YAW_OFFSET=-Math.PI/2;
+const BOAT_ANIM_SPEED=.045;
+const BOAT_FACING_YAW_OFFSET=0;
 let boatLastWorldPos=new THREE.Vector3();
 let boatFacingReady=false;
 let boatPrevPos=new THREE.Vector3();
@@ -1337,7 +1337,7 @@ function applyPresenceRows(rows){
   for(const row of rows){
     if(!row || row.client_id===clientId)continue;
     const lastSeen=row.last_seen?new Date(row.last_seen).getTime():0;
-    if(!lastSeen || now-lastSeen>10000)continue;
+    if(!lastSeen || now-lastSeen>3500)continue;
     if(!Number.isFinite(row.x) || !Number.isFinite(row.z))continue;
 
     const entry=ensureRemoteAvatar(row.client_id,{
@@ -1365,7 +1365,32 @@ function applyPresenceRows(rows){
 async function fetchPresenceOnly(){
   const {data,error}=await supabase.from('atelier_presence').select('*');
   if(error){console.warn('presence poll',error);return;}
-  applyPresenceRows(data||[]);
+
+  const rows=data||[];
+  const now=Date.now();
+  const freshIds=new Set();
+
+  for(const row of rows){
+    if(!row || row.client_id===clientId)continue;
+    const lastSeen=row.last_seen?new Date(row.last_seen).getTime():0;
+    if(lastSeen && now-lastSeen<=3500)freshIds.add(row.client_id);
+  }
+
+  // Polling is authoritative: if a client is not genuinely fresh anymore,
+  // remove its rendered avatar immediately instead of letting it blink for ~10s.
+  for(const [id,entry] of [...remoteAvatars]){
+    const seated=seatSlots.some(seat=>seat.serverOccupant===id);
+    if(!freshIds.has(id) && !seated){
+      disposeRemoteAvatar(entry);
+      remoteMotion.delete(id);
+    }
+  }
+
+  applyPresenceRows(rows.filter(row=>{
+    if(!row || row.client_id===clientId)return false;
+    const lastSeen=row.last_seen?new Date(row.last_seen).getTime():0;
+    return !!lastSeen && now-lastSeen<=3500;
+  }));
 }
 
 function handlePresenceChange(payload){
@@ -3568,51 +3593,71 @@ function createCloudGroup(puffTexture,scale=1){
 
 function createAtmosphericClouds(){
   const tex=makeCloudPuffTexture();
+
   const configs=[
-    {x:-16,y:5.1,z:-8,s:1.75,speed:.23},
-    {x:-10,y:6.1,z:-11,s:1.55,speed:.18},
-    {x:-4,y:5.7,z:-9,s:2.00,speed:.17},
-    {x:3,y:6.4,z:-12,s:1.70,speed:.20},
-    {x:9,y:5.5,z:-10,s:1.65,speed:.22},
-    {x:15,y:6.2,z:-13,s:2.10,speed:.15},
-    {x:-13,y:7.5,z:-15,s:1.45,speed:.16},
-    {x:-6,y:8.1,z:-17,s:1.80,speed:.14},
-    {x:2,y:7.7,z:-16,s:1.55,speed:.18},
-    {x:10,y:8.4,z:-18,s:1.95,speed:.13},
-    {x:17,y:7.2,z:-14,s:1.50,speed:.19}
+    {a:.08,r:14.2,y:5.5,s:1.75,speed:.025},
+    {a:.58,r:16.0,y:6.2,s:1.55,speed:.020},
+    {a:1.05,r:15.0,y:5.9,s:2.05,speed:.018},
+    {a:1.48,r:17.0,y:6.8,s:1.65,speed:.016},
+    {a:1.95,r:14.8,y:5.6,s:1.70,speed:.022},
+    {a:2.38,r:16.5,y:6.3,s:2.10,speed:.015},
+    {a:2.90,r:15.2,y:7.3,s:1.55,speed:.017},
+    {a:3.35,r:17.2,y:7.8,s:1.85,speed:.014},
+    {a:3.82,r:14.5,y:6.9,s:1.60,speed:.019},
+    {a:4.26,r:16.1,y:8.2,s:1.95,speed:.013},
+    {a:4.78,r:15.0,y:7.4,s:1.50,speed:.018},
+    {a:5.25,r:17.0,y:6.7,s:1.80,speed:.016},
+    {a:5.72,r:14.6,y:5.8,s:1.65,speed:.021}
   ];
 
   for(const cfg of configs){
     const cloud=createCloudGroup(tex,cfg.s);
-    cloud.position.set(cfg.x,cfg.y,cfg.z);
+    cloud.position.set(Math.cos(cfg.a)*cfg.r,cfg.y,Math.sin(cfg.a)*cfg.r);
+    cloud.userData.angle=cfg.a;
+    cloud.userData.radius=cfg.r;
     cloud.userData.speed=cfg.speed;
     scene.add(cloud);
     skyClouds.push(cloud);
-  }
 
-  // Remove the old flat reflection sprites: they read as white bars rather than reflections.
-  for(const r of waterCloudReflections)scene.remove(r);
-  waterCloudReflections.length=0;
+    // A broader, darker reflection group, kept low over the exterior water ring.
+    const reflection=createCloudGroup(tex,cfg.s*1.12);
+    reflection.position.set(
+      Math.cos(cfg.a)*cfg.r,
+      -.62,
+      Math.sin(cfg.a)*cfg.r
+    );
+    reflection.scale.y=-.72;
+    reflection.traverse(o=>{
+      if(o.material){
+        o.material=o.material.clone();
+        o.material.opacity=.34;
+        o.material.color.set(0xc2dce5);
+        o.material.depthWrite=false;
+      }
+    });
+    reflection.userData.angle=cfg.a;
+    reflection.userData.radius=cfg.r;
+    reflection.userData.speed=cfg.speed*.9;
+    scene.add(reflection);
+    waterCloudReflections.push(reflection);
+  }
 }
 
 function updateAtmosphericClouds(dt){
-  const minX=-20;
-  const maxX=20;
-
-  // Screen-right-ish motion: use the camera's local right direction projected onto the ground plane.
-  const right=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
-  right.y=0;
-  if(right.lengthSq()<.001)right.set(1,0,0);
-  right.normalize();
-
   for(const cloud of skyClouds){
-    cloud.position.addScaledVector(right,cloud.userData.speed*dt);
+    cloud.userData.angle=(cloud.userData.angle+cloud.userData.speed*dt)%(Math.PI*2);
+    const a=cloud.userData.angle;
+    const r=cloud.userData.radius;
+    cloud.position.x=Math.cos(a)*r;
+    cloud.position.z=Math.sin(a)*r;
+  }
 
-    // Wrap based on radial distance from the atelier center so it stays around the visible horizon.
-    if(cloud.position.length()>28){
-      cloud.position.x=-cloud.position.x*.72;
-      cloud.position.z=-cloud.position.z*.72;
-    }
+  for(const reflection of waterCloudReflections){
+    reflection.userData.angle=(reflection.userData.angle+reflection.userData.speed*dt)%(Math.PI*2);
+    const a=reflection.userData.angle;
+    const r=reflection.userData.radius;
+    reflection.position.x=Math.cos(a)*r;
+    reflection.position.z=Math.sin(a)*r;
   }
 }
 
