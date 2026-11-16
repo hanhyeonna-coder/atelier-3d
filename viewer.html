@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v5.2 · 5min artwork hold + transparent PNG fix + seat availability</div>
+  <div id="version">controller v5.3 · artwork owner can re-enter locked easel</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -1296,9 +1296,16 @@ artUpload.addEventListener('change',()=>{
 function requestPlayerSeat(seat){
   if(!seat)return false;
 
-  if(isArtworkLocked(seat)){
+  if(isArtworkLocked(seat) && savedArtworkSeatIndex!==seat.index){
     status.textContent=`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`;
     return true;
+  }
+
+  // The owner can return to their own displayed artwork immediately.
+  if(isArtworkLocked(seat) && savedArtworkSeatIndex===seat.index){
+    seat.artworkLockedUntil=0;
+    savedArtworkLockedUntil=0;
+    saveProgress();
   }
 
   if(seat.occupiedBy && seat.occupiedBy!=='player'){
