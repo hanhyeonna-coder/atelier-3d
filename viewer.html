@@ -860,7 +860,7 @@ function releaseSeat(npc){
 }
 
 function reserveRandomSeat(npc){
-  const free=seatSlots.filter(s=>!s.occupiedBy && !isArtworkLocked(s));
+  const free=seatSlots.filter(s=>!s.occupiedBy && !s.serverOccupant && !isArtworkLocked(s));
   if(!free.length)return false;
   const seat=free[Math.floor(Math.random()*free.length)];
   seat.occupiedBy=npc;
@@ -916,7 +916,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
 
   // Make the room immediately feel occupied: two residents begin seated,
   // the rest start at separated roaming locations.
-  const freeSeats=seatSlots.filter(s=>!isArtworkLocked(s));
+  const freeSeats=seatSlots.filter(s=>!s.serverOccupant && !isArtworkLocked(s));
   for(let i=0;i<Math.min(2,npcs.length,freeSeats.length);i++){
     const idx=Math.floor(Math.random()*freeSeats.length);
     const seat=freeSeats.splice(idx,1)[0];
@@ -968,6 +968,16 @@ function applyServerEasels(rows){
   for(const seat of seatSlots){
     const row=byIndex.get(seat.index);
     seat.serverOccupant=row?.occupant_id||null;
+
+    // A real remote user always wins over a local decorative NPC.
+    if(seat.serverOccupant && seat.serverOccupant!==clientId && seat.occupiedBy && seat.occupiedBy!=='player'){
+      const npc=seat.occupiedBy;
+      if(npc?.seat===seat)npc.seat=null;
+      npc.target=randomWalkTarget(npc);
+      npc.state='walking';
+      playNPC(npc,'Avatar_Walk');
+      seat.occupiedBy=null;
+    }
   }
   syncRemoteAvatars();
 }
