@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.5 · no dummy NPCs + refined name tags</div>
+  <div id="version">controller v6.6 · proximity names + faster live motion</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -1040,7 +1040,7 @@ function syncRemoteAvatars(){
 
   for(const [id,entry] of remoteAvatars){
     const motion=remoteMotion.get(id);
-    if(!wanted.has(id) && (!motion || performance.now()-(motion.receivedAt||0)>4000))disposeRemoteAvatar(entry);
+    if(!wanted.has(id) && (!motion || performance.now()-(motion.receivedAt||0)>1800))disposeRemoteAvatar(entry);
   }
 
   for(const [id,seat] of wanted){
@@ -1183,6 +1183,8 @@ function ensureRemoteAvatar(id,state={}){
     scene.add(root);
     entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0};
     setAvatarNameLabel(root,state.displayName||'이름 없는 화가');
+    const initialLabel=root.getObjectByName('Player Name Label');
+    if(initialLabel)initialLabel.visible=false;
     remoteAvatars.set(id,entry);
   }
   if(Number.isFinite(state.seatIndex))recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
@@ -1282,6 +1284,20 @@ function broadcastMotion(force=false){
   });
 }
 
+function updateProximityNameLabels(){
+  if(!avatarRoot)return;
+  const threshold=2.4;
+  for(const entry of remoteAvatars.values()){
+    const label=entry.root.getObjectByName('Player Name Label');
+    if(!label)continue;
+    const d=entry.root.position.distanceTo(avatarRoot.position);
+    label.visible=d<=threshold;
+  }
+
+  const ownLabel=avatarRoot.getObjectByName('Player Name Label');
+  if(ownLabel)ownLabel.visible=false;
+}
+
 function updateRemoteMotion(dt){
   const now=performance.now();
   for(const [id,entry] of remoteAvatars){
@@ -1293,7 +1309,7 @@ function updateRemoteMotion(dt){
     delta=Math.atan2(Math.sin(delta),Math.cos(delta));
     entry.root.rotation.y+=delta*Math.min(1,dt*12);
 
-    if(now-entry.lastMotionAt>4000 && !seatSlots.some(seat=>seat.serverOccupant===id)){
+    if(now-entry.lastMotionAt>1800 && !seatSlots.some(seat=>seat.serverOccupant===id)){
       disposeRemoteAvatar(entry);
       remoteMotion.delete(id);
     }
@@ -2459,6 +2475,8 @@ Promise.all([
   avatarRoot.add(avatarModel);
   normalizeAvatarOrigin(avatarModel);
   setAvatarNameLabel(avatarRoot,displayName);
+  const ownNameLabel=avatarRoot.getObjectByName('Player Name Label');
+  if(ownNameLabel)ownNameLabel.visible=false;
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   window.__atelierAvatarClips=avGLB.animations;
@@ -2480,7 +2498,7 @@ Promise.all([
   await fetchServerState();
   startRealtimeSync();
   heartbeatTimer=setInterval(serverHeartbeat,5000);
-  presencePulseTimer=setInterval(serverPresencePulse,1000);
+  presencePulseTimer=setInterval(serverPresencePulse,250);
   serverPresencePulse();
 
   cameraFocus.set(
