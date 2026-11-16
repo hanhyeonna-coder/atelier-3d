@@ -28,9 +28,9 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.1 · multiplayer lock + HUD cleanup</div>
+  <div id="version">controller v6.2 · painter names + unique hats + friendly timer</div>
 </div>
-<div id="timerPanel"><span id="workTimer">오늘 00:00 · 누적 00:00</span></div>
+<div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -124,7 +124,27 @@ if(!clientId){
   clientId=crypto.randomUUID();
   localStorage.setItem(CLIENT_ID_KEY,clientId);
 }
-const displayName='Painter-'+clientId.slice(0,4);
+const ARTIST_NAMES=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
+const ARTIST_QUIRKS=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
+
+function hashString(str){
+  let h=2166136261;
+  for(let i=0;i<str.length;i++){
+    h^=str.charCodeAt(i);
+    h=Math.imul(h,16777619);
+  }
+  return h>>>0;
+}
+
+const DISPLAY_NAME_KEY='atelier3d_display_name';
+let displayName=localStorage.getItem(DISPLAY_NAME_KEY);
+if(!displayName){
+  const h=hashString(clientId);
+  const artist=ARTIST_NAMES[h%ARTIST_NAMES.length];
+  const quirk=ARTIST_QUIRKS[Math.floor(h/ARTIST_NAMES.length)%ARTIST_QUIRKS.length];
+  displayName=`${quirk} ${artist}`;
+  localStorage.setItem(DISPLAY_NAME_KEY,displayName);
+}
 const remoteAvatars=new Map();
 let realtimeChannel=null;
 let heartbeatTimer=null;
@@ -174,9 +194,13 @@ const NPC_HAT_COLORS=[
 ];
 
 const hatColorPool=[...NPC_HAT_COLORS];
-for(let i=hatColorPool.length-1;i>0;i--){
-  const j=Math.floor(Math.random()*(i+1));
-  [hatColorPool[i],hatColorPool[j]]=[hatColorPool[j],hatColorPool[i]];
+
+function hatColorForSeatIndex(index){
+  return hatColorPool[((index%hatColorPool.length)+hatColorPool.length)%hatColorPool.length];
+}
+
+function standingPlayerHatColor(){
+  return hatColorPool[hashString(clientId)%hatColorPool.length];
 }
 
 let envMixer=null;
@@ -914,7 +938,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
       speed:THREE.MathUtils.randFloat(1.0,1.45)
     };
 
-    const color=hatColorPool[(i+1)%hatColorPool.length];
+    const color=hatColorPool[(hatColorPool.length-1-i+hatColorPool.length)%hatColorPool.length];
     npc.hatColor=color;
     recolorBeret(model,color);
 
@@ -1025,10 +1049,12 @@ function syncRemoteAvatars(){
       action?.reset().play();
       root.position.copy(seat.position);
       root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
+      recolorBeret(model,hatColorForSeatIndex(seat.index));
       scene.add(root);
       entry={clientId:id,root,model,mixer:mixer2,actions:actions2};
       remoteAvatars.set(id,entry);
     }else{
+      recolorBeret(entry.model,hatColorForSeatIndex(seat.index));
       entry.root.position.copy(seat.position);
       entry.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
     }
@@ -1288,6 +1314,7 @@ function releasePlayerSeat(){
   if(pendingPlayerSeat?.occupiedBy==='player')pendingPlayerSeat.occupiedBy=null;
   playerSeat=null;
   pendingPlayerSeat=null;
+  if(avatarModel)recolorBeret(avatarModel,standingPlayerHatColor());
 }
 
 function isCanvasMesh(o){
@@ -2082,6 +2109,13 @@ function formatDuration(seconds){
   return `${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
 }
 
+function formatTodayWork(seconds){
+  const totalMinutes=Math.floor(Math.max(0,seconds)/60);
+  const hours=Math.floor(totalMinutes/60);
+  const minutes=totalMinutes%60;
+  return `${String(hours).padStart(2,'0')}시간 ${String(minutes).padStart(2,'0')}분`;
+}
+
 function updateWorkTimer(dt){
   if(playerSeat){
     workElapsedSeconds+=dt;
@@ -2093,8 +2127,10 @@ function updateWorkTimer(dt){
     }
   }
 
-  workTimer.textContent=
-    `오늘 ${formatDuration(workElapsedSeconds)} · 누적 ${formatDuration(totalWorkElapsedSeconds)}`;
+  const timeText=formatTodayWork(workElapsedSeconds);
+  workTimer.textContent=playerSeat
+    ? `그림 그리는 중 · 오늘 ${timeText}`
+    : `오늘 ${timeText} 그림 그렸어요`;
 }
 
 function updateMovement(dt){
@@ -2135,6 +2171,7 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         mySeat=playerSeat;
+        recolorBeret(avatarModel,hatColorForSeatIndex(playerSeat.index));
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
@@ -2290,7 +2327,7 @@ Promise.all([
     avatarActions[clip.name]=avatarMixer.clipAction(clip);
   });
 
-  recolorBeret(avatarModel,hatColorPool[0]);
+  recolorBeret(avatarModel,standingPlayerHatColor());
   playAvatar('Avatar_Idle',0);
 
   // Build real stool seat anchors from the uploaded furniture GLB,
