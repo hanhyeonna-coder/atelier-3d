@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.4 · split environments + authored boat motion</div>
+  <div id="version">controller v8.5 · slow aligned boat + outdoor snow + denser clouds</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -316,6 +316,10 @@ let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
 let extEnvMixer=null;
+const BOAT_ANIM_SPEED=.18;
+const BOAT_FACING_YAW_OFFSET=-Math.PI/2;
+let boatLastWorldPos=new THREE.Vector3();
+let boatFacingReady=false;
 let boatPrevPos=new THREE.Vector3();
 
 const skyClouds=[];
@@ -3204,6 +3208,7 @@ Promise.all([
       extEnvGLB.animations.forEach(clip=>{
         const action=extEnvMixer.clipAction(clip);
         action.setLoop(THREE.LoopRepeat,Infinity);
+        action.setEffectiveTimeScale(BOAT_ANIM_SPEED);
         action.play();
       });
     }
@@ -3273,6 +3278,11 @@ Promise.all([
       });
     }else{
       boatMixer=null;
+    }
+
+    if(boatMover){
+      boatMover.getWorldPosition(boatLastWorldPos);
+      boatFacingReady=true;
     }
   }
 
@@ -3426,6 +3436,15 @@ function createBridgeAndGalleryLot(){
   scene.add(bridgeGroup);
 }
 
+function randomSnowXZOutsidePavilion(){
+  let x=0,z=0;
+  do{
+    x=(Math.random()-.5)*30;
+    z=(Math.random()-.5)*30;
+  }while(Math.hypot(x,z)<WALK_RADIUS+1.0);
+  return [x,z];
+}
+
 function createSnowSystem(){
   const geometry=new THREE.BufferGeometry();
   snowPositions=new Float32Array(SNOW_COUNT*3);
@@ -3433,9 +3452,10 @@ function createSnowSystem(){
 
   for(let i=0;i<SNOW_COUNT;i++){
     const j=i*3;
-    snowPositions[j]=(Math.random()-.5)*26;
+    const [sx,sz]=randomSnowXZOutsidePavilion();
+    snowPositions[j]=sx;
     snowPositions[j+1]=Math.random()*13+1.5;
-    snowPositions[j+2]=(Math.random()-.5)*26;
+    snowPositions[j+2]=sz;
 
     const k=i*2;
     snowVelocities[k]=.45+Math.random()*.75;
@@ -3473,16 +3493,24 @@ function updateSnow(dt){
     pos[j+1]-= snowVelocities[k] * dt;
     pos[j+2]+= Math.sin((performance.now()*.0005)+(i*.37))*.018*dt;
 
-    if(pos[j+1]<-.15){
-      pos[j]=(Math.random()-.5)*26;
-      pos[j+1]=Math.random()*5+10;
-      pos[j+2]=(Math.random()-.5)*26;
+    if(Math.hypot(pos[j],pos[j+2])<WALK_RADIUS+.8){
+      const [sx,sz]=randomSnowXZOutsidePavilion();
+      pos[j]=sx;
+      pos[j+2]=sz;
     }
 
-    if(pos[j]>14)pos[j]=-14;
-    if(pos[j]<-14)pos[j]=14;
-    if(pos[j+2]>14)pos[j+2]=-14;
-    if(pos[j+2]<-14)pos[j+2]=14;
+    if(pos[j+1]<-.15){
+      const [sx,sz]=randomSnowXZOutsidePavilion();
+      pos[j]=sx;
+      pos[j+1]=Math.random()*5+10;
+      pos[j+2]=sz;
+    }
+
+    if(pos[j]>15 || pos[j]<-15 || pos[j+2]>15 || pos[j+2]<-15){
+      const [sx,sz]=randomSnowXZOutsidePavilion();
+      pos[j]=sx;
+      pos[j+2]=sz;
+    }
   }
 
   snowSystem.geometry.attributes.position.needsUpdate=true;
@@ -3515,7 +3543,7 @@ function createCloudGroup(puffTexture,scale=1){
     transparent:true,
     depthWrite:false,
     depthTest:true,
-    opacity:.88,
+    opacity:.98,
     color:0xffffff
   });
 
@@ -3541,11 +3569,17 @@ function createCloudGroup(puffTexture,scale=1){
 function createAtmosphericClouds(){
   const tex=makeCloudPuffTexture();
   const configs=[
-    {x:-12,y:5.3,z:-9,s:1.55,speed:.23},
-    {x:-3,y:6.0,z:-12,s:1.85,speed:.17},
-    {x:7,y:5.6,z:-10,s:1.45,speed:.21},
-    {x:15,y:6.4,z:-13,s:1.95,speed:.14},
-    {x:1,y:7.1,z:-16,s:1.35,speed:.18}
+    {x:-16,y:5.1,z:-8,s:1.75,speed:.23},
+    {x:-10,y:6.1,z:-11,s:1.55,speed:.18},
+    {x:-4,y:5.7,z:-9,s:2.00,speed:.17},
+    {x:3,y:6.4,z:-12,s:1.70,speed:.20},
+    {x:9,y:5.5,z:-10,s:1.65,speed:.22},
+    {x:15,y:6.2,z:-13,s:2.10,speed:.15},
+    {x:-13,y:7.5,z:-15,s:1.45,speed:.16},
+    {x:-6,y:8.1,z:-17,s:1.80,speed:.14},
+    {x:2,y:7.7,z:-16,s:1.55,speed:.18},
+    {x:10,y:8.4,z:-18,s:1.95,speed:.13},
+    {x:17,y:7.2,z:-14,s:1.50,speed:.19}
   ];
 
   for(const cfg of configs){
@@ -3585,6 +3619,22 @@ function updateAtmosphericClouds(dt){
 
 function updateBoatMotion(dt){
   if(boatMixer)boatMixer.update(dt);
+  if(!boatMover || !boatFacingReady)return;
+
+  const current=new THREE.Vector3();
+  boatMover.getWorldPosition(current);
+  const dx=current.x-boatLastWorldPos.x;
+  const dz=current.z-boatLastWorldPos.z;
+
+  if((dx*dx+dz*dz)>.000001){
+    const desiredYaw=Math.atan2(dx,dz)+BOAT_FACING_YAW_OFFSET;
+    const currentYaw=boatMover.rotation.y;
+    let delta=desiredYaw-currentYaw;
+    delta=Math.atan2(Math.sin(delta),Math.cos(delta));
+    boatMover.rotation.y=currentYaw+delta*Math.min(1,dt*5.5);
+  }
+
+  boatLastWorldPos.copy(current);
 }
 
 function tick(){
