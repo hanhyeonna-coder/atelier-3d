@@ -73,9 +73,9 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.1 · unique remote hats + artwork CORS fix + auth rate feedback</div>
+  <div id="version">controller v9.2 · intl UI + English names + bridge nudge</div>
 </div>
-<div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
+<div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
 <button id="accountBtn">👤 로그인</button>
 <div id="statusToast"></div>
@@ -162,6 +162,27 @@ const accountEmail=document.getElementById('accountEmail');
 const accountAction=document.getElementById('accountAction');
 const logoutBtn=document.getElementById('logoutBtn');
 const accountState=document.getElementById('accountState');
+
+function applyLocaleUI(){
+  document.querySelector('#hud div').textContent=t(
+    '클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동',
+    'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
+  );
+  historyBtn.textContent=t('진행 기록','Progress');
+  accountBtn.textContent=currentUser?t('👤 내 계정','👤 Account'):t('👤 로그인','👤 Log in');
+  accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
+  accountDesc.textContent=t(
+    '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
+    'Log in by email to continue the same artwork progress across devices.'
+  );
+  accountAction.textContent=t('로그인 링크 받기','Send login link');
+  historySummary.textContent=t('현재 작품 진행 과정','Current artwork progress');
+  completeWorkBtn.textContent=t('작품 완성하고 보관하기','Complete & archive');
+  deleteCurrentWorkBtn.textContent=t('이 작품 폐기하기','Discard this artwork');
+  completedTitle.textContent=t('완성 작품 보관함','Completed artworks');
+  artPreview.alt=t('작품 크게 보기','Artwork preview');
+}
+applyLocaleUI();
 let statusHideTimer=null;
 function showStatus(message,ms=2200){
   status.textContent=message;
@@ -214,6 +235,8 @@ const clock=new THREE.Clock();
 const SUPABASE_URL='https://uuotlmljzvludygzrvvt.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_QXfhaLNfkXUs13Pe8u7wYQ_V9F2low4';
 const supabase=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const IS_KO=(navigator.language||'').toLowerCase().startsWith('ko');
+const t=(ko,en)=>IS_KO?ko:en;
 const CLIENT_ID_KEY='atelier3d_client_id';
 let clientId=localStorage.getItem(CLIENT_ID_KEY);
 if(!clientId){
@@ -225,8 +248,8 @@ let currentUser=null;
 let artworkSaveQueue=Promise.resolve();
 let progressSlides=[];
 let progressSlideIndex=0;
-const ARTIST_NAMES=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
-const ARTIST_QUIRKS=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
+const ARTIST_NAMES=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
+const ARTIST_QUIRKS=['Coffee-Cold','Cloud-Counting','Sleepy-Eyed','Paint-Smudged','Window-Gazing','Brush-Lost','Humming','One-Sock-Missing','Daydreaming','Pencil-Chewing','Yawning','Hungry','Stretching','Blue-Mood','Moon-Watching'];
 
 function hashString(str){
   let h=2166136261;
@@ -238,12 +261,15 @@ function hashString(str){
 }
 
 const DISPLAY_NAME_KEY='atelier3d_display_name';
-let displayName=localStorage.getItem(DISPLAY_NAME_KEY);
-if(!displayName){
-  const h=hashString(clientId);
+function makeEnglishDisplayName(id){
+  const h=hashString(id);
   const artist=ARTIST_NAMES[h%ARTIST_NAMES.length];
   const quirk=ARTIST_QUIRKS[Math.floor(h/ARTIST_NAMES.length)%ARTIST_QUIRKS.length];
-  displayName=`${quirk} ${artist}`;
+  return `${quirk} ${artist}`;
+}
+let displayName=localStorage.getItem(DISPLAY_NAME_KEY);
+if(!displayName || /[가-힣]/.test(displayName)){
+  displayName=makeEnglishDisplayName(clientId);
   localStorage.setItem(DISPLAY_NAME_KEY,displayName);
 }
 const remoteAvatars=new Map();
@@ -344,7 +370,7 @@ const WALK_RADIUS=8.05;
 const CAMERA_RADIUS=8.95;
 const BRIDGE_HALF_WIDTH=1.15;
 const BRIDGE_ANGLE=THREE.MathUtils.degToRad(18);
-const BRIDGE_OFFSET_X=-0.85;
+const BRIDGE_OFFSET_X=-1.03;
 const BRIDGE_OFFSET_Z=0.15;
 const BRIDGE_START_Z=6.9;
 const BRIDGE_END_Z=15.8;
@@ -1595,7 +1621,7 @@ async function adoptGuestDataIntoAccount(user){
   await fetchServerState();
 
   if(avatarRoot)setAvatarNameLabel(avatarRoot,displayName);
-  accountBtn.textContent='👤 내 계정';
+  accountBtn.textContent=t('👤 내 계정','👤 Account');
   accountEmail.style.display='none';
   accountAction.style.display='none';
   logoutBtn.style.display='block';
@@ -1607,11 +1633,11 @@ function resetToGuestIdentity(){
   ownerId=clientId;
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  accountBtn.textContent='👤 로그인';
+  accountBtn.textContent=t('👤 로그인','👤 Log in');
   accountEmail.style.display='block';
   accountAction.style.display='block';
   logoutBtn.style.display='none';
-  accountState.textContent='로그인하면 다른 기기에서도 같은 기록을 이어볼 수 있어요.';
+  accountState.textContent=t('로그인하면 다른 기기에서도 같은 기록을 이어볼 수 있어요.','Log in to continue the same progress across devices.');
 }
 
 async function refreshAuthSession(){
@@ -1631,12 +1657,12 @@ accountModal.addEventListener('click',e=>{
 accountAction.addEventListener('click',async ()=>{
   const email=accountEmail.value.trim();
   if(!email){
-    accountState.textContent='이메일 주소를 입력해 주세요.';
+    accountState.textContent=t('이메일 주소를 입력해 주세요.','Enter your email address.');
     return;
   }
 
   accountAction.disabled=true;
-  accountState.textContent='로그인 링크를 보내는 중...';
+  accountState.textContent=t('로그인 링크를 보내는 중...','Sending login link...');
 
   const {error}=await supabase.auth.signInWithOtp({
     email,
@@ -1646,18 +1672,30 @@ accountAction.addEventListener('click',async ()=>{
     }
   });
 
-  accountAction.disabled=false;
   if(error){
+    accountAction.disabled=false;
     console.warn('magic link',error);
     if(error.code==='over_email_send_rate_limit' || error.status===429){
-      accountState.textContent='로그인 메일을 너무 자주 요청했어요. 잠시 후 다시 시도해 주세요.';
+      accountState.textContent=t('로그인 메일을 너무 자주 요청했어요. 잠시 후 다시 시도해 주세요.','Too many login emails requested. Please try again later.');
     }else{
-      accountState.textContent='로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.';
+      accountState.textContent=t('로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.','Could not send the login link. Please try again later.');
     }
     return;
   }
 
-  accountState.textContent='메일을 확인해 주세요. 처음이면 계정도 자동으로 만들어져요.';
+  accountState.textContent=t('메일을 확인해 주세요. 처음이면 계정도 자동으로 만들어져요.','Check your email. A new account will be created automatically if needed.');
+  accountAction.disabled=true;
+  let cooldown=60;
+  const originalText=t('로그인 링크 받기','Send login link');
+  const timer=setInterval(()=>{
+    cooldown--;
+    accountAction.textContent=t(`다시 보내기 ${cooldown}초`,`Resend in ${cooldown}s`);
+    if(cooldown<=0){
+      clearInterval(timer);
+      accountAction.disabled=false;
+      accountAction.textContent=originalText;
+    }
+  },1000);
 });
 
 logoutBtn.addEventListener('click',async ()=>{
@@ -3076,8 +3114,8 @@ function updateWorkTimer(dt){
 
   const timeText=formatTodayWork(workElapsedSeconds);
   workTimer.textContent=playerSeat
-    ? `그림 그리는 중 · 오늘 ${timeText}`
-    : `오늘 ${timeText} 그림 그렸어요`;
+    ? t(`그림 그리는 중 · 오늘 ${timeText}`,`Painting · today ${timeText}`)
+    : t(`오늘 ${timeText} 그림 그렸어요`,`Today: ${timeText} painting`);
 }
 
 function updateMovement(dt){
