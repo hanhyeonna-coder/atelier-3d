@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.0 · tuned boat speed + bridge entrance reposition</div>
+  <div id="version">controller v9.1 · unique remote hats + artwork CORS fix + auth rate feedback</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -308,8 +308,13 @@ function hatColorForSeatIndex(index){
   return hatColorPool[((index%hatColorPool.length)+hatColorPool.length)%hatColorPool.length];
 }
 
+function standingHatColorForClient(id){
+  const hue=(hashString(id)%360)/360;
+  return new THREE.Color().setHSL(hue,.68,.52);
+}
+
 function standingPlayerHatColor(){
-  return hatColorPool[hashString(clientId)%hatColorPool.length];
+  return standingHatColorForClient(clientId);
 }
 
 let envMixer=null;
@@ -1249,7 +1254,9 @@ function applyServerArtworks(rows){
     seat.userData.artworkDataUrl=row.image_url;
     seat.userData.artworkMeta=(row.display_name||'Painter')+' · 작업 '+Math.max(1,Math.round((row.work_seconds||0)/60))+'분';
     const img=new Image();
+    img.crossOrigin='anonymous';
     img.onload=()=>getCanvasMeshesForSeat(seat).forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
+    img.onerror=()=>console.warn('remote artwork image failed',row.image_url);
     img.src=row.image_url;
   }
 }
@@ -1333,7 +1340,11 @@ function ensureRemoteAvatar(id,state={}){
     if(initialLabel)initialLabel.visible=false;
     remoteAvatars.set(id,entry);
   }
-  if(Number.isFinite(state.seatIndex))recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
+  if(Number.isFinite(state.seatIndex)){
+    recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
+  }else{
+    recolorBeret(entry.model,standingHatColorForClient(id));
+  }
   if(state.displayName)setAvatarNameLabel(entry.root,state.displayName);
   return entry;
 }
@@ -1370,9 +1381,13 @@ function applyPresenceRows(rows){
     }
     entry.lastMotionAt=performance.now();
 
-    if(row.state==='working')playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-    else if(row.state==='walking')playRemote(entry,'Avatar_Walk');
-    else playRemote(entry,'Avatar_Idle');
+    if(row.state==='working'){
+      playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+    }else{
+      if(!Number.isFinite(row.seat_index))recolorBeret(entry.model,standingHatColorForClient(row.client_id));
+      if(row.state==='walking')playRemote(entry,'Avatar_Walk');
+      else playRemote(entry,'Avatar_Idle');
+    }
   }
 }
 
@@ -1440,9 +1455,13 @@ function handleRemoteMotion(message){
   entry.targetYaw=Number.isFinite(p.yaw)?p.yaw:entry.root.rotation.y;
   entry.lastMotionAt=performance.now();
 
-  if(p.state==='working')playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-  else if(p.state==='walking')playRemote(entry,'Avatar_Walk');
-  else playRemote(entry,'Avatar_Idle');
+  if(p.state==='working'){
+    playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+  }else{
+    if(!Number.isFinite(p.seatIndex))recolorBeret(entry.model,standingHatColorForClient(p.clientId));
+    if(p.state==='walking')playRemote(entry,'Avatar_Walk');
+    else playRemote(entry,'Avatar_Idle');
+  }
 }
 
 function broadcastMotion(force=false){
@@ -1630,7 +1649,11 @@ accountAction.addEventListener('click',async ()=>{
   accountAction.disabled=false;
   if(error){
     console.warn('magic link',error);
-    accountState.textContent='로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.';
+    if(error.code==='over_email_send_rate_limit' || error.status===429){
+      accountState.textContent='로그인 메일을 너무 자주 요청했어요. 잠시 후 다시 시도해 주세요.';
+    }else{
+      accountState.textContent='로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.';
+    }
     return;
   }
 
@@ -2262,6 +2285,7 @@ function restoreSavedArtwork(){
   }
 
   const img=new Image();
+  if(/^https?:\/\//i.test(savedArtworkDataUrl))img.crossOrigin='anonymous';
   img.onload=()=>{
     const canvases=getCanvasMeshesForSeat(seat);
     canvases.forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
