@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v5.1 · persistent work time + artwork restore</div>
+  <div id="version">controller v5.2 · 5min artwork hold + transparent PNG fix + seat availability</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -102,6 +102,8 @@ let workSaveAccumulator=0;
 const STORAGE_KEY='atelier3d_progress_v1';
 let savedArtworkDataUrl=null;
 let savedArtworkSeatIndex=null;
+let savedArtworkLockedUntil=0;
+const ARTWORK_HOLD_MS=5*60*1000;
 let workPromptSprite=null;
 let workPromptTexture=null;
 let workPromptCanvas=null;
@@ -755,6 +757,7 @@ function collectSeatSlots(furnitureRoot){
       seatTop:finalBox.max.y,
       faceDir,
       occupiedBy:null,
+      artworkLockedUntil:0,
       clickRadius:0.95
     };
 
@@ -822,10 +825,9 @@ function releaseSeat(npc){
 }
 
 function reserveRandomSeat(npc){
-  const free=seatSlots.filter(s=>!s.occupiedBy);
+  const free=seatSlots.filter(s=>!s.occupiedBy && !isArtworkLocked(s));
   if(!free.length)return false;
   const seat=free[Math.floor(Math.random()*free.length)];
-  if(playerArtworkSeat===seat)clearArtworkFromSeat(seat);
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.target=seat.position.clone();
@@ -835,7 +837,6 @@ function reserveRandomSeat(npc){
 }
 
 function placeNPCSeated(npc,seat){
-  if(playerArtworkSeat===seat)clearArtworkFromSeat(seat);
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.root.position.copy(seat.position);
@@ -880,7 +881,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
 
   // Make the room immediately feel occupied: two residents begin seated,
   // the rest start at separated roaming locations.
-  const freeSeats=seatSlots.slice();
+  const freeSeats=seatSlots.filter(s=>!isArtworkLocked(s));
   for(let i=0;i<Math.min(2,npcs.length,freeSeats.length);i++){
     const idx=Math.floor(Math.random()*freeSeats.length);
     const seat=freeSeats.splice(idx,1)[0];
@@ -937,6 +938,7 @@ function loadProgress(){
 
     savedArtworkDataUrl=typeof data.artworkDataUrl==='string' ? data.artworkDataUrl : null;
     savedArtworkSeatIndex=Number.isInteger(data.artworkSeatIndex) ? data.artworkSeatIndex : null;
+    savedArtworkLockedUntil=Math.max(0,Number(data.artworkLockedUntil)||0);
   }catch(err){
     console.warn('Progress restore failed:',err);
   }
@@ -949,7 +951,8 @@ function saveProgress(){
       todaySeconds:workElapsedSeconds,
       totalSeconds:totalWorkElapsedSeconds,
       artworkDataUrl:savedArtworkDataUrl,
-      artworkSeatIndex:savedArtworkSeatIndex
+      artworkSeatIndex:savedArtworkSeatIndex,
+      artworkLockedUntil:savedArtworkLockedUntil
     }));
   }catch(err){
     console.warn('Progress save failed:',err);
@@ -968,19 +971,66 @@ function makeStoredArtworkDataUrl(img){
   c.width=w;
   c.height=h;
   const ctx=c.getContext('2d');
+  // Flatten transparent PNG/WebP onto the physical white canvas before JPEG persistence.
+  // Otherwise transparent pixels become black after reload.
+  ctx.fillStyle='#f7f4ed';
+  ctx.fillRect(0,0,w,h);
   ctx.drawImage(img,0,0,w,h);
 
   // JPEG keeps localStorage use small enough for normal artwork screenshots/photos.
   return c.toDataURL('image/jpeg',.82);
 }
 
+function remainingLockMinutes(seat){
+  const ms=Math.max(0,(seat?.artworkLockedUntil||0)-Date.now());
+  return Math.max(1,Math.ceil(ms/60000));
+}
+
+function isArtworkLocked(seat){
+  return !!seat && (seat.artworkLockedUntil||0)>Date.now();
+}
+
+function applySavedArtworkLock(){
+  if(savedArtworkSeatIndex===null)return;
+  const seat=seatSlots.find(s=>s.index===savedArtworkSeatIndex);
+  if(!seat)return;
+
+  if(savedArtworkLockedUntil>Date.now()){
+    seat.artworkLockedUntil=savedArtworkLockedUntil;
+  }else{
+    savedArtworkLockedUntil=0;
+  }
+}
+
+function updateArtworkLocks(){
+  const now=Date.now();
+  for(const seat of seatSlots){
+    if(!seat.artworkLockedUntil || seat.artworkLockedUntil>now)continue;
+
+    seat.artworkLockedUntil=0;
+    if(playerArtworkSeat===seat || savedArtworkSeatIndex===seat.index){
+      clearArtworkFromSeat(seat);
+    }
+  }
+}
+
 function restoreSavedArtwork(){
   if(!savedArtworkDataUrl || savedArtworkSeatIndex===null)return;
 
   const seat=seatSlots.find(s=>s.index===savedArtworkSeatIndex);
-  if(!seat || seat.occupiedBy){
+  if(!seat){
     savedArtworkDataUrl=null;
     savedArtworkSeatIndex=null;
+    savedArtworkLockedUntil=0;
+    saveProgress();
+    return;
+  }
+
+  if(savedArtworkLockedUntil && savedArtworkLockedUntil<=Date.now()){
+    savedArtworkDataUrl=null;
+    savedArtworkSeatIndex=null;
+    savedArtworkLockedUntil=0;
+    seat.artworkLockedUntil=0;
     saveProgress();
     return;
   }
@@ -1000,7 +1050,18 @@ function restoreSavedArtwork(){
 }
 
 function releasePlayerSeat(){
-  if(playerSeat?.occupiedBy==='player')playerSeat.occupiedBy=null;
+  if(playerSeat){
+    if(playerSeat.occupiedBy==='player')playerSeat.occupiedBy=null;
+
+    if(playerArtworkSeat===playerSeat && savedArtworkDataUrl){
+      const until=Date.now()+ARTWORK_HOLD_MS;
+      playerSeat.artworkLockedUntil=until;
+      savedArtworkLockedUntil=until;
+      savedArtworkSeatIndex=playerSeat.index;
+      saveProgress();
+    }
+  }
+
   if(pendingPlayerSeat?.occupiedBy==='player')pendingPlayerSeat.occupiedBy=null;
   playerSeat=null;
   pendingPlayerSeat=null;
@@ -1180,9 +1241,11 @@ function clearArtworkFromSeat(seat){
     mesh.remove(old);
   });
   if(playerArtworkSeat===seat)playerArtworkSeat=null;
+  if(seat)seat.artworkLockedUntil=0;
   if(savedArtworkSeatIndex===seat?.index){
     savedArtworkDataUrl=null;
     savedArtworkSeatIndex=null;
+    savedArtworkLockedUntil=0;
     saveProgress();
   }
 }
@@ -1207,6 +1270,8 @@ function applyArtworkImage(img){
   playerArtworkSeat=playerSeat;
   savedArtworkDataUrl=makeStoredArtworkDataUrl(img);
   savedArtworkSeatIndex=playerSeat.index;
+  savedArtworkLockedUntil=0;
+  playerSeat.artworkLockedUntil=0;
   saveProgress();
   status.textContent='작품이 저장됐어요';
 }
@@ -1231,9 +1296,24 @@ artUpload.addEventListener('change',()=>{
 function requestPlayerSeat(seat){
   if(!seat)return false;
 
-  if(seat.occupiedBy && seat.occupiedBy!=='player'){
-    status.textContent='이미 누가 앉아 있는 스툴이에요';
+  if(isArtworkLocked(seat)){
+    status.textContent=`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`;
     return true;
+  }
+
+  if(seat.occupiedBy && seat.occupiedBy!=='player'){
+    const npc=seat.occupiedBy;
+    if(npc?.state==='goingToSeat'){
+      // Visually empty seats stay available to the player; reroute the NPC instead.
+      if(npc.seat===seat)npc.seat=null;
+      npc.target=randomWalkTarget(npc);
+      npc.state='walking';
+      playNPC(npc,'Avatar_Walk');
+      seat.occupiedBy=null;
+    }else{
+      status.textContent='지금 다른 사람이 앉아 있어요';
+      return true;
+    }
   }
 
   releasePlayerSeat();
@@ -1805,6 +1885,7 @@ Promise.all([
   // then create independent residents from the same rigged avatar.
   if(furnitureGLB){
     collectSeatSlots(furnitureGLB.scene);
+    applySavedArtworkLock();
   }
   spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
   restoreSavedArtwork();
@@ -1867,6 +1948,7 @@ function tick(){
   });
 
   updateWorkTimer(dt);
+  updateArtworkLocks();
   updateWorkPrompt();
   updateMovement(dt);
   updateCamera();
