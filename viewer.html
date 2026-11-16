@@ -20,8 +20,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v5.0 · user-owned artwork handoff + single compact prompt</div>
+  <div id="workTimer">오늘 00:00 · 누적 00:00</div>
+  <div id="version">controller v5.1 · persistent work time + artwork restore</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -97,6 +97,11 @@ let playerSeat=null;
 let mySeat=null;
 let playerArtworkSeat=null;
 let workElapsedSeconds=0;
+let totalWorkElapsedSeconds=0;
+let workSaveAccumulator=0;
+const STORAGE_KEY='atelier3d_progress_v1';
+let savedArtworkDataUrl=null;
+let savedArtworkSeatIndex=null;
 let workPromptSprite=null;
 let workPromptTexture=null;
 let workPromptCanvas=null;
@@ -911,6 +916,89 @@ function playerCandidateBlocked(candidate,minDistance=.64){
   return npcs.some(n=>n.root.position.distanceTo(candidate)<minDistance);
 }
 
+function localDateKey(){
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function loadProgress(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw)return;
+    const data=JSON.parse(raw);
+
+    totalWorkElapsedSeconds=Math.max(0,Number(data.totalSeconds)||0);
+    workElapsedSeconds=(data.date===localDateKey())
+      ? Math.max(0,Number(data.todaySeconds)||0)
+      : 0;
+
+    savedArtworkDataUrl=typeof data.artworkDataUrl==='string' ? data.artworkDataUrl : null;
+    savedArtworkSeatIndex=Number.isInteger(data.artworkSeatIndex) ? data.artworkSeatIndex : null;
+  }catch(err){
+    console.warn('Progress restore failed:',err);
+  }
+}
+
+function saveProgress(){
+  try{
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({
+      date:localDateKey(),
+      todaySeconds:workElapsedSeconds,
+      totalSeconds:totalWorkElapsedSeconds,
+      artworkDataUrl:savedArtworkDataUrl,
+      artworkSeatIndex:savedArtworkSeatIndex
+    }));
+  }catch(err){
+    console.warn('Progress save failed:',err);
+  }
+}
+
+function makeStoredArtworkDataUrl(img){
+  const maxSide=1200;
+  const srcW=img.naturalWidth||img.width;
+  const srcH=img.naturalHeight||img.height;
+  const scale=Math.min(1,maxSide/Math.max(srcW,srcH));
+  const w=Math.max(1,Math.round(srcW*scale));
+  const h=Math.max(1,Math.round(srcH*scale));
+
+  const c=document.createElement('canvas');
+  c.width=w;
+  c.height=h;
+  const ctx=c.getContext('2d');
+  ctx.drawImage(img,0,0,w,h);
+
+  // JPEG keeps localStorage use small enough for normal artwork screenshots/photos.
+  return c.toDataURL('image/jpeg',.82);
+}
+
+function restoreSavedArtwork(){
+  if(!savedArtworkDataUrl || savedArtworkSeatIndex===null)return;
+
+  const seat=seatSlots.find(s=>s.index===savedArtworkSeatIndex);
+  if(!seat || seat.occupiedBy){
+    savedArtworkDataUrl=null;
+    savedArtworkSeatIndex=null;
+    saveProgress();
+    return;
+  }
+
+  const img=new Image();
+  img.onload=()=>{
+    const canvases=getCanvasMeshesForSeat(seat);
+    canvases.forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
+    playerArtworkSeat=seat;
+  };
+  img.onerror=()=>{
+    savedArtworkDataUrl=null;
+    savedArtworkSeatIndex=null;
+    saveProgress();
+  };
+  img.src=savedArtworkDataUrl;
+}
+
 function releasePlayerSeat(){
   if(playerSeat?.occupiedBy==='player')playerSeat.occupiedBy=null;
   if(pendingPlayerSeat?.occupiedBy==='player')pendingPlayerSeat.occupiedBy=null;
@@ -1092,6 +1180,11 @@ function clearArtworkFromSeat(seat){
     mesh.remove(old);
   });
   if(playerArtworkSeat===seat)playerArtworkSeat=null;
+  if(savedArtworkSeatIndex===seat?.index){
+    savedArtworkDataUrl=null;
+    savedArtworkSeatIndex=null;
+    saveProgress();
+  }
 }
 
 function applyArtworkImage(img){
@@ -1112,7 +1205,10 @@ function applyArtworkImage(img){
   });
 
   playerArtworkSeat=playerSeat;
-  status.textContent='작품이 캔버스 정면에 올라갔어요';
+  savedArtworkDataUrl=makeStoredArtworkDataUrl(img);
+  savedArtworkSeatIndex=playerSeat.index;
+  saveProgress();
+  status.textContent='작품이 저장됐어요';
 }
 
 artUpload.addEventListener('change',()=>{
@@ -1486,19 +1582,28 @@ function updateWorkPrompt(){
   workPromptSprite.visible=true;
 }
 
-function updateWorkTimer(dt){
-  if(playerSeat)workElapsedSeconds+=dt;
-
-  const total=Math.floor(workElapsedSeconds);
+function formatDuration(seconds){
+  const total=Math.floor(Math.max(0,seconds));
   const hours=Math.floor(total/3600);
   const minutes=Math.floor((total%3600)/60);
-  const seconds=total%60;
-  const mm=String(minutes).padStart(2,'0');
-  const ss=String(seconds).padStart(2,'0');
+  const secs=total%60;
+  if(hours>0)return `${hours}:${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  return `${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+}
 
-  workTimer.textContent=hours>0
-    ? `작업시간 ${hours}:${mm}:${ss}`
-    : `작업시간 ${mm}:${ss}`;
+function updateWorkTimer(dt){
+  if(playerSeat){
+    workElapsedSeconds+=dt;
+    totalWorkElapsedSeconds+=dt;
+    workSaveAccumulator+=dt;
+    if(workSaveAccumulator>=5){
+      workSaveAccumulator=0;
+      saveProgress();
+    }
+  }
+
+  workTimer.textContent=
+    `오늘 ${formatDuration(workElapsedSeconds)} · 누적 ${formatDuration(totalWorkElapsedSeconds)}`;
 }
 
 function updateMovement(dt){
@@ -1581,6 +1686,8 @@ function updateMovement(dt){
   avatarRoot.position.copy(next);
   playAvatar('Avatar_Walk');
 }
+
+loadProgress();
 
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
@@ -1700,6 +1807,7 @@ Promise.all([
     collectSeatSlots(furnitureGLB.scene);
   }
   spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
+  restoreSavedArtwork();
 
   cameraFocus.set(
     avatarRoot.position.x,
@@ -1766,6 +1874,8 @@ function tick(){
   renderer.render(scene,camera);
 }
 tick();
+
+addEventListener('beforeunload',saveProgress);
 
 addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;
