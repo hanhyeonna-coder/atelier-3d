@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v4.1 · latest flowers + lower flower -90°</div>
+  <div id="version">controller v4.2 · seated avatars face easel + latest flowers</div>
 </div>
 
 <script type="importmap">
@@ -132,7 +132,7 @@ const CAMERA_RADIUS=8.95;
 const MOVE_SPEED=1.85;
 const CENTER_BLOCK_RADIUS=1.90;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
-const SIT_YAW_CORRECTION=-Math.PI/2; // Sit animation is quarter-turned vs locomotion; rotate left to face the easel.
+const SIT_YAW_CORRECTION=Math.PI/2; // Sit pose is quarter-turned vs locomotion; +90° makes the seated avatar face the easel.
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
@@ -991,7 +991,7 @@ function updateNPCs(dt,now){
       if(distance<.10){
         if(npc.state==='goingToSeat'&&npc.seat){
           npc.root.position.copy(npc.seat.position);
-          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+MODEL_YAW_CORRECTION;
+          npc.root.rotation.y=Math.atan2(npc.seat.faceDir.x,npc.seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
           npc.state='seated';
           npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
           npc.target=null;
