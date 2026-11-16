@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.8 · remove embedded rigged ghosts</div>
+  <div id="version">controller v6.9 · remove embedded avatar mesh duplicates</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -2407,6 +2407,44 @@ function hideEmbeddedRiggedCharacters(root){
   }
 }
 
+function normalizedAssetName(name){
+  return (name||'')
+    .toLowerCase()
+    .replace(/\.\d{3}$/,'')
+    .replace(/[_\-\s]+/g,' ')
+    .trim();
+}
+
+function hideAvatarLikeMeshes(root,avatarSource){
+  if(!root || !avatarSource)return;
+
+  const avatarMeshNames=new Set();
+  const avatarGeometryNames=new Set();
+
+  avatarSource.traverse(o=>{
+    if(!o.isMesh && !o.isSkinnedMesh)return;
+    const on=normalizedAssetName(o.name);
+    const gn=normalizedAssetName(o.geometry?.name);
+    if(on)avatarMeshNames.add(on);
+    if(gn)avatarGeometryNames.add(gn);
+  });
+
+  root.traverse(o=>{
+    if(!o.isMesh && !o.isSkinnedMesh)return;
+
+    const on=normalizedAssetName(o.name);
+    const gn=normalizedAssetName(o.geometry?.name);
+
+    const nameMatch=(on && avatarMeshNames.has(on));
+    const geometryMatch=(gn && avatarGeometryNames.has(gn));
+
+    if(nameMatch || geometryMatch){
+      o.visible=false;
+      o.userData.hiddenAvatarDuplicate=true;
+    }
+  });
+}
+
 loadProgress();
 
 Promise.all([
@@ -2416,11 +2454,17 @@ Promise.all([
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
-  // Non-avatar GLBs must never contribute rigged character meshes.
+  // Non-avatar GLBs must never contribute character meshes.
+  // Catch both rigged duplicates and meshes accidentally exported as ordinary geometry.
   hideEmbeddedRiggedCharacters(envGLB?.scene);
   hideEmbeddedRiggedCharacters(furnitureGLB?.scene);
   hideEmbeddedRiggedCharacters(flowerGLB?.scene);
   hideEmbeddedRiggedCharacters(boatGLB?.scene);
+
+  hideAvatarLikeMeshes(envGLB?.scene,avGLB?.scene);
+  hideAvatarLikeMeshes(furnitureGLB?.scene,avGLB?.scene);
+  hideAvatarLikeMeshes(flowerGLB?.scene,avGLB?.scene);
+  hideAvatarLikeMeshes(boatGLB?.scene,avGLB?.scene);
 
   // Hide stale decor/furniture baked into the environment.
   // Dedicated GLBs below are now the single source of truth.
