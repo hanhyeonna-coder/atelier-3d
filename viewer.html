@@ -28,18 +28,26 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #historyModal.show{display:flex}
 #historyCard{position:relative;width:min(90vw,860px);max-height:84vh;overflow:auto;padding:22px;border-radius:20px;background:rgba(255,255,255,.97);box-shadow:0 18px 60px rgba(0,0,0,.28);box-sizing:border-box}
 #historyClose{position:absolute;right:12px;top:10px;border:0;background:#f1ece7;width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
-#historySummary{font-size:16px;font-weight:800;color:#42362f;margin:4px 42px 16px 0}
-#historyGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-.historyItem{background:#f7f3ef;border-radius:14px;padding:9px}
-.historyItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:white;border-radius:9px;display:block}
-.historyMeta{font-size:11px;color:#6b5a50;margin-top:7px;line-height:1.35}
-#completedTitle{margin-top:22px;margin-bottom:10px;font-size:14px;font-weight:900;color:#42362f}
-#completedGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
-.completedItem{background:#f3eee9;border-radius:14px;padding:8px}
-.completedItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:9px;display:block}
+#currentProgressSection{display:none}
+#historySummary{font-size:16px;font-weight:800;color:#42362f;margin:4px 42px 14px 0}
+#historyGrid{display:block}
+#progressStage{position:relative;width:min(100%,700px);margin:0 auto;background:#f7f3ef;border-radius:18px;padding:14px;box-sizing:border-box}
+#progressImage{display:block;width:100%;height:min(50vh,480px);object-fit:contain;background:#fff;border-radius:12px;cursor:pointer}
+.progressNav{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:19px;background:rgba(55,43,35,.72);color:#fff;font-size:22px;cursor:pointer}
+#progressPrev{left:22px}
+#progressNext{right:22px}
+#progressMeta{text-align:center;margin-top:10px;font-size:12px;color:#6b5a50}
+#progressActions{display:flex;justify-content:center;gap:10px;margin:16px 0 0;flex-wrap:wrap}
+#completeWorkBtn,#deleteCurrentWorkBtn{width:auto;min-width:180px;max-width:280px;margin:0;border:0;border-radius:13px;padding:11px 16px;font-weight:900;cursor:pointer}
+#completeWorkBtn{background:#5d493d;color:white}
+#deleteCurrentWorkBtn{background:#eee7e1;color:#7c5148}
+#completeWorkBtn:disabled,#deleteCurrentWorkBtn:disabled{opacity:.4;cursor:default}
+#completedTitle{margin-top:24px;margin-bottom:10px;font-size:14px;font-weight:900;color:#42362f}
+#completedGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.completedItem{position:relative;background:#f3eee9;border-radius:14px;padding:8px}
+.completedItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:9px;display:block;cursor:pointer}
 .completedMeta{font-size:11px;color:#6b5a50;margin-top:6px}
-#completeWorkBtn{display:block;width:100%;margin:18px 0 0;border:0;border-radius:14px;padding:12px 14px;background:#5d493d;color:white;font-weight:900;cursor:pointer}
-#completeWorkBtn:disabled{opacity:.4;cursor:default}
+.completedDelete{width:100%;margin-top:7px;border:0;border-radius:9px;padding:7px 8px;background:#eadeda;color:#7b5149;font-size:11px;font-weight:800;cursor:pointer}
 #statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
 #statusToast.show{opacity:1}
 #version{opacity:.38;font-size:10px;margin-top:4px}
@@ -57,7 +65,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.6 · accounts + completed work archive</div>
+  <div id="version">controller v7.7 · progress slider + authenticated archive + deletion</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -74,9 +82,21 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="historyModal">
   <div id="historyCard">
     <button id="historyClose" aria-label="닫기">×</button>
-    <div id="historySummary">내 작업 기록</div>
-    <div id="historyGrid"></div>
-    <button id="completeWorkBtn">이 작품을 완성하고 기록 보관하기</button>
+    <div id="currentProgressSection">
+      <div id="historySummary">현재 작품 진행 과정</div>
+      <div id="historyGrid">
+        <div id="progressStage">
+          <img id="progressImage" alt="현재 작품 진행 과정"/>
+          <button id="progressPrev" class="progressNav" aria-label="이전 단계">‹</button>
+          <button id="progressNext" class="progressNav" aria-label="다음 단계">›</button>
+          <div id="progressMeta"></div>
+        </div>
+      </div>
+      <div id="progressActions">
+        <button id="completeWorkBtn">작품 완성하고 보관하기</button>
+        <button id="deleteCurrentWorkBtn">이 작품 폐기하기</button>
+      </div>
+    </div>
     <div id="completedTitle">완성 작품 보관함</div>
     <div id="completedGrid"></div>
   </div>
@@ -121,9 +141,15 @@ const artClose=document.getElementById('artClose');
 const historyBtn=document.getElementById('historyBtn');
 const historyModal=document.getElementById('historyModal');
 const historyClose=document.getElementById('historyClose');
+const currentProgressSection=document.getElementById('currentProgressSection');
 const historySummary=document.getElementById('historySummary');
 const historyGrid=document.getElementById('historyGrid');
+const progressImage=document.getElementById('progressImage');
+const progressPrev=document.getElementById('progressPrev');
+const progressNext=document.getElementById('progressNext');
+const progressMeta=document.getElementById('progressMeta');
 const completeWorkBtn=document.getElementById('completeWorkBtn');
+const deleteCurrentWorkBtn=document.getElementById('deleteCurrentWorkBtn');
 const completedGrid=document.getElementById('completedGrid');
 const accountBtn=document.getElementById('accountBtn');
 const accountModal=document.getElementById('accountModal');
@@ -193,6 +219,8 @@ if(!clientId){
 let ownerId=clientId;
 let currentUser=null;
 let artworkSaveQueue=Promise.resolve();
+let progressSlides=[];
+let progressSlideIndex=0;
 const ARTIST_NAMES=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
 const ARTIST_QUIRKS=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
 
@@ -1622,6 +1650,14 @@ async function uploadArtworkToStorage(dataUrl,workId){
 }
 
 async function completeCurrentWork(){
+  if(!currentUser){
+    showStatus('작품을 보관하려면 계정을 먼저 만들어 주세요',2800);
+    historyModal.classList.remove('show');
+    accountModal.classList.add('show');
+    accountState.textContent='완성 작품을 보관하려면 이메일로 계정을 만들어 주세요.';
+    return;
+  }
+
   await artworkSaveQueue;
   const workId=await findActiveWork();
   if(!workId){
@@ -1656,6 +1692,74 @@ async function completeCurrentWork(){
 
 completeWorkBtn.addEventListener('click',completeCurrentWork);
 
+async function deleteWorkCompletely(workId,{active=false}={}){
+  if(!workId)return false;
+
+  const [{data:historyRows},{data:currentRows}]=await Promise.all([
+    supabase.from('atelier_artwork_history').select('storage_path').eq('work_id',workId),
+    supabase.from('atelier_artworks').select('storage_path').eq('work_id',workId)
+  ]);
+
+  const paths=[...(historyRows||[]),...(currentRows||[])]
+    .map(r=>r.storage_path)
+    .filter(Boolean);
+  const uniquePaths=[...new Set(paths)];
+
+  await supabase.from('atelier_artworks').delete().eq('work_id',workId);
+  const {error}=await supabase.from('atelier_works')
+    .delete()
+    .eq('id',workId)
+    .eq('owner_id',ownerId);
+
+  if(error){
+    console.warn('delete work',error);
+    showStatus('작품을 삭제하지 못했어요');
+    return false;
+  }
+
+  if(uniquePaths.length){
+    const {error:storageError}=await supabase.storage.from('atelier-artworks').remove(uniquePaths);
+    if(storageError)console.warn('delete storage files',storageError);
+  }
+
+  if(active){
+    activeWorkId=null;
+    activeWorkCoverUrl=null;
+    if(playerArtworkSeat)clearArtworkFromSeat(playerArtworkSeat);
+    savedArtworkDataUrl=null;
+    savedArtworkSeatIndex=null;
+    savedArtworkLockedUntil=0;
+    saveProgress();
+  }
+
+  return true;
+}
+
+async function deleteCurrentWork(){
+  const workId=await findActiveWork();
+  if(!workId)return;
+  if(!confirm('현재 작업 중인 작품과 진행 기록을 모두 삭제할까요?'))return;
+
+  deleteCurrentWorkBtn.disabled=true;
+  const ok=await deleteWorkCompletely(workId,{active:true});
+  deleteCurrentWorkBtn.disabled=false;
+  if(ok){
+    showStatus('현재 작품을 폐기했어요');
+    await loadMyHistory();
+  }
+}
+
+async function deleteCompletedWork(workId){
+  if(!confirm('이 완성 작품과 진행 기록을 모두 삭제할까요?'))return;
+  const ok=await deleteWorkCompletely(workId);
+  if(ok){
+    showStatus('완성 작품을 삭제했어요');
+    await loadMyHistory();
+  }
+}
+
+deleteCurrentWorkBtn.addEventListener('click',deleteCurrentWork);
+
 async function syncDailyWorkToServer(){
   const {error}=await supabase.from('atelier_daily_work').upsert({
     owner_id:ownerId,
@@ -1668,14 +1772,12 @@ async function syncDailyWorkToServer(){
 }
 
 async function loadMyHistory(){
-  historySummary.textContent='기록 불러오는 중...';
-  historyGrid.innerHTML='';
   historyModal.classList.add('show');
+  completedGrid.innerHTML='';
+  progressSlides=[];
+  progressSlideIndex=0;
 
   const workId=await findActiveWork();
-  completeWorkBtn.disabled=!workId;
-
-  completedGrid.innerHTML='';
 
   const [
     {data:history,error:hErr},
@@ -1704,32 +1806,23 @@ async function loadMyHistory(){
 
   if(hErr || dErr || cErr){
     console.warn(hErr||dErr||cErr);
-    historySummary.textContent='기록을 불러오지 못했어요';
+    showStatus('기록을 불러오지 못했어요');
     return;
   }
 
   const todaySeconds=Math.max(workElapsedSeconds,Number(daily?.work_seconds)||0);
-  historySummary.textContent=`현재 작품 진행 과정 · ${history?.length||0}단계 · 오늘 ${formatTodayWork(todaySeconds)}`;
 
-  if(!history?.length){
-    historyGrid.innerHTML='<div style="color:#7a6b62;font-size:13px">아직 이 작품의 진행 기록이 없어요.</div>';
+  if(workId && history?.length){
+    currentProgressSection.style.display='block';
+    progressSlides=history;
+    progressSlideIndex=history.length-1;
+    completeWorkBtn.disabled=false;
+    deleteCurrentWorkBtn.disabled=false;
+    historySummary.textContent=`현재 작품 진행 과정 · ${history.length}단계 · 오늘 ${formatTodayWork(todaySeconds)}`;
+    renderProgressSlide();
   }else{
-    for(const [index,item] of history.entries()){
-      const card=document.createElement('div');
-      card.className='historyItem';
-
-      const img=document.createElement('img');
-      img.src=item.image_url;
-      img.alt='내 작품';
-
-      const meta=document.createElement('div');
-      meta.className='historyMeta';
-      const when=new Date(item.created_at);
-      meta.textContent=`${index+1}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
-
-      card.append(img,meta);
-      historyGrid.appendChild(card);
-    }
+    currentProgressSection.style.display='none';
+    progressSlides=[];
   }
 
   if(!completed?.length){
@@ -1742,6 +1835,15 @@ async function loadMyHistory(){
       const img=document.createElement('img');
       img.src=work.cover_image_url||'';
       img.alt='완성 작품';
+      img.addEventListener('click',()=>{
+        if(!work.cover_image_url)return;
+        artPreview.src=work.cover_image_url;
+        const when=work.completed_at?new Date(work.completed_at):null;
+        artMeta.textContent=when
+          ? `완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`
+          : '완성 작품';
+        artModal.classList.add('show');
+      });
 
       const meta=document.createElement('div');
       meta.className='completedMeta';
@@ -1750,11 +1852,48 @@ async function loadMyHistory(){
         ? `${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`
         : formatTodayWork(work.total_work_seconds||0);
 
-      card.append(img,meta);
+      const del=document.createElement('button');
+      del.className='completedDelete';
+      del.textContent='삭제';
+      del.addEventListener('click',e=>{
+        e.stopPropagation();
+        deleteCompletedWork(work.id);
+      });
+
+      card.append(img,meta,del);
       completedGrid.appendChild(card);
     }
   }
 }
+function renderProgressSlide(){
+  if(!progressSlides.length)return;
+  progressSlideIndex=Math.max(0,Math.min(progressSlideIndex,progressSlides.length-1));
+  const item=progressSlides[progressSlideIndex];
+
+  progressImage.src=item.image_url;
+  const when=new Date(item.created_at);
+  progressMeta.textContent=`${progressSlideIndex+1} / ${progressSlides.length} · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
+  progressPrev.style.visibility=progressSlides.length>1?'visible':'hidden';
+  progressNext.style.visibility=progressSlides.length>1?'visible':'hidden';
+}
+
+progressPrev.addEventListener('click',()=>{
+  if(!progressSlides.length)return;
+  progressSlideIndex=(progressSlideIndex-1+progressSlides.length)%progressSlides.length;
+  renderProgressSlide();
+});
+progressNext.addEventListener('click',()=>{
+  if(!progressSlides.length)return;
+  progressSlideIndex=(progressSlideIndex+1)%progressSlides.length;
+  renderProgressSlide();
+});
+progressImage.addEventListener('click',()=>{
+  const item=progressSlides[progressSlideIndex];
+  if(!item)return;
+  artPreview.src=item.image_url;
+  artMeta.textContent=`진행 ${progressSlideIndex+1}/${progressSlides.length}`;
+  artModal.classList.add('show');
+});
 
 historyBtn.addEventListener('click',loadMyHistory);
 historyClose.addEventListener('click',()=>historyModal.classList.remove('show'));
