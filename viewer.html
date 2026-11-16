@@ -1595,9 +1595,19 @@ async function adoptGuestDataIntoAccount(user){
   if(profileError)console.warn('profile lookup',profileError);
 
   if(profile?.display_name){
-    displayName=profile.display_name;
+    if(/[가-힣]/.test(profile.display_name)){
+      displayName=makeEnglishDisplayName(user.id);
+      const {error:profileRenameError}=await supabase
+        .from('atelier_profiles')
+        .update({display_name:displayName})
+        .eq('user_id',user.id);
+      if(profileRenameError)console.warn('profile rename',profileRenameError);
+    }else{
+      displayName=profile.display_name;
+    }
     localStorage.setItem(DISPLAY_NAME_KEY,displayName);
   }else{
+    if(/[가-힣]/.test(displayName))displayName=makeEnglishDisplayName(user.id);
     const {error:profileInsertError}=await supabase
       .from('atelier_profiles')
       .insert({user_id:user.id,display_name:displayName});
