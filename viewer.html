@@ -1713,24 +1713,23 @@ async function loadMyHistory(){
 
   if(!history?.length){
     historyGrid.innerHTML='<div style="color:#7a6b62;font-size:13px">아직 이 작품의 진행 기록이 없어요.</div>';
-    return;
-  }
+  }else{
+    for(const [index,item] of history.entries()){
+      const card=document.createElement('div');
+      card.className='historyItem';
 
-  for(const [index,item] of history.entries()){
-    const card=document.createElement('div');
-    card.className='historyItem';
+      const img=document.createElement('img');
+      img.src=item.image_url;
+      img.alt='내 작품';
 
-    const img=document.createElement('img');
-    img.src=item.image_url;
-    img.alt='내 작품';
+      const meta=document.createElement('div');
+      meta.className='historyMeta';
+      const when=new Date(item.created_at);
+      meta.textContent=`${index+1}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
 
-    const meta=document.createElement('div');
-    meta.className='historyMeta';
-    const when=new Date(item.created_at);
-    meta.textContent=`${index+1}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
-
-    card.append(img,meta);
-    historyGrid.appendChild(card);
+      card.append(img,meta);
+      historyGrid.appendChild(card);
+    }
   }
 
   if(!completed?.length){
