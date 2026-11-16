@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.9 · real boat slowdown + gallery left shift + production auth redirect</div>
+  <div id="version">controller v9.0 · tuned boat speed + bridge entrance reposition</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -316,7 +316,7 @@ let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
 let extEnvMixer=null;
-const BOAT_ANIM_SPEED=.012;
+const BOAT_ANIM_SPEED=.036;
  let boatLastWorldPos=new THREE.Vector3();
 let boatFacingReady=false;
 let boatPrevPos=new THREE.Vector3();
@@ -338,8 +338,9 @@ const BOAT_Y=-0.75;
 const WALK_RADIUS=8.05;
 const CAMERA_RADIUS=8.95;
 const BRIDGE_HALF_WIDTH=1.15;
-const BRIDGE_ANGLE=0;
-const BRIDGE_OFFSET_X=-2.15;
+const BRIDGE_ANGLE=THREE.MathUtils.degToRad(18);
+const BRIDGE_OFFSET_X=-0.85;
+const BRIDGE_OFFSET_Z=0.15;
 const BRIDGE_START_Z=6.9;
 const BRIDGE_END_Z=15.8;
 const GALLERY_CENTER_Z=18.4;
@@ -751,7 +752,7 @@ function setAvatarFacing(dir){
 
 function toBridgeLocal(v){
   const px=v.x-BRIDGE_OFFSET_X;
-  const pz=v.z;
+  const pz=v.z-BRIDGE_OFFSET_Z;
   const c=Math.cos(-BRIDGE_ANGLE);
   const sn=Math.sin(-BRIDGE_ANGLE);
   return {
@@ -3411,7 +3412,7 @@ Promise.all([
 function createBridgeAndGalleryLot(){
   const bridgeGroup=new THREE.Group();
   bridgeGroup.name='Gallery Bridge Prototype';
-  bridgeGroup.position.x=BRIDGE_OFFSET_X;
+  bridgeGroup.position.set(BRIDGE_OFFSET_X,0,BRIDGE_OFFSET_Z);
   bridgeGroup.rotation.y=BRIDGE_ANGLE;
 
   const woodMat=new THREE.MeshStandardMaterial({
