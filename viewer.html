@@ -33,12 +33,14 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #historyGrid{display:block}
 #progressStage{position:relative;width:min(100%,760px);height:min(48vh,430px);margin:0 auto;background:#f7f3ef;border-radius:18px;padding:14px;box-sizing:border-box;overflow:hidden}
 #progressCarousel{position:relative;width:100%;height:calc(100% - 32px);display:flex;align-items:center;justify-content:center}
-.progressSlide{position:absolute;top:50%;left:50%;width:min(66%,500px);height:92%;object-fit:contain;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.16);transition:transform .26s ease,opacity .26s ease,filter .26s ease;cursor:pointer;transform-origin:center center}
+.progressSlide{position:absolute;top:50%;left:50%;width:min(66%,500px);height:92%;object-fit:contain;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.16);transition:transform .48s cubic-bezier(.22,.8,.22,1),opacity .42s ease,filter .42s ease;cursor:pointer;transform-origin:center center;will-change:transform,opacity}
 .progressSlide.center{transform:translate(-50%,-50%) scale(1);opacity:1;z-index:5;filter:none}
 .progressSlide.left1{transform:translate(-82%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
 .progressSlide.right1{transform:translate(-18%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
 .progressSlide.left2{transform:translate(-101%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
 .progressSlide.right2{transform:translate(1%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
+.progressSlide.hiddenLeft{transform:translate(-120%,-50%) scale(.42);opacity:0;z-index:1}
+.progressSlide.hiddenRight{transform:translate(20%,-50%) scale(.42);opacity:0;z-index:1}
 #progressMeta{text-align:center;margin-top:8px;font-size:12px;color:#6b5a50}
 #progressActions{display:flex;justify-content:center;gap:10px;margin:16px 0 0;flex-wrap:wrap}
 #completeWorkBtn,#deleteCurrentWorkBtn{width:auto;min-width:180px;max-width:280px;margin:0;border:0;border-radius:13px;padding:11px 16px;font-weight:900;cursor:pointer}
@@ -70,7 +72,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.0 · visible clouds + polished archive UI</div>
+  <div id="version">controller v8.1 · animated coverflow + fluffy clouds</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -1826,6 +1828,7 @@ async function loadMyHistory(){
     currentProgressSection.style.display='block';
     progressSlides=history;
     progressSlideIndex=history.length-1;
+    buildProgressSlides();
     completeWorkBtn.disabled=false;
     deleteCurrentWorkBtn.disabled=false;
     historySummary.textContent=`현재 작품 진행 과정 · ${history.length}단계 · 이 작품 ${formatTodayWork(currentWorkElapsedSeconds)}`;
@@ -1876,28 +1879,14 @@ async function loadMyHistory(){
     }
   }
 }
-function renderProgressSlide(){
+function buildProgressSlides(){
   progressCarousel.innerHTML='';
-  if(!progressSlides.length)return;
-
-  progressSlideIndex=Math.max(0,Math.min(progressSlideIndex,progressSlides.length-1));
-  const active=progressSlides[progressSlideIndex];
-
-  const offsets=[-2,-1,0,1,2];
-  for(const offset of offsets){
-    const index=progressSlideIndex+offset;
-    if(index<0 || index>=progressSlides.length)continue;
-
-    const item=progressSlides[index];
+  for(const [index,item] of progressSlides.entries()){
     const img=document.createElement('img');
     img.src=item.image_url;
     img.alt=`진행 ${index+1}단계`;
-    img.className='progressSlide '+(
-      offset===0?'center':
-      offset===-1?'left1':
-      offset===1?'right1':
-      offset===-2?'left2':'right2'
-    );
+    img.className='progressSlide';
+    img.dataset.index=String(index);
 
     img.addEventListener('click',()=>{
       if(index===progressSlideIndex){
@@ -1912,10 +1901,51 @@ function renderProgressSlide(){
 
     progressCarousel.appendChild(img);
   }
+}
+
+function renderProgressSlide(){
+  if(!progressSlides.length)return;
+  progressSlideIndex=Math.max(0,Math.min(progressSlideIndex,progressSlides.length-1));
+
+  const active=progressSlides[progressSlideIndex];
+  const slides=[...progressCarousel.querySelectorAll('.progressSlide')];
+
+  for(const img of slides){
+    const index=Number(img.dataset.index);
+    const offset=index-progressSlideIndex;
+    img.className='progressSlide '+(
+      offset===0?'center':
+      offset===-1?'left1':
+      offset===1?'right1':
+      offset===-2?'left2':
+      offset===2?'right2':
+      offset<0?'hiddenLeft':'hiddenRight'
+    );
+  }
 
   const when=new Date(active.created_at);
   progressMeta.textContent=`${progressSlideIndex+1} / ${progressSlides.length} · ${when.toLocaleDateString()} · 이 작품 ${formatTodayWork(active.work_seconds||0)}`;
 }
+
+let progressTouchStartX=null;
+progressCarousel.addEventListener('pointerdown',e=>{
+  progressTouchStartX=e.clientX;
+});
+progressCarousel.addEventListener('pointerup',e=>{
+  if(progressTouchStartX==null)return;
+  const dx=e.clientX-progressTouchStartX;
+  progressTouchStartX=null;
+  if(Math.abs(dx)<45)return;
+
+  if(dx<0 && progressSlideIndex<progressSlides.length-1){
+    progressSlideIndex++;
+    renderProgressSlide();
+  }else if(dx>0 && progressSlideIndex>0){
+    progressSlideIndex--;
+    renderProgressSlide();
+  }
+});
+progressCarousel.addEventListener('pointercancel',()=>{progressTouchStartX=null;});
 
 
 historyBtn.addEventListener('click',loadMyHistory);
@@ -3268,109 +3298,100 @@ Promise.all([
   showStatus(String(err));
 });
 
-function makeCloudTexture(){
+function makeCloudPuffTexture(){
   const c=document.createElement('canvas');
-  c.width=512;
+  c.width=256;
   c.height=256;
   const ctx=c.getContext('2d');
-  ctx.clearRect(0,0,c.width,c.height);
-
-  const blobs=[
-    [130,145,78],
-    [205,116,92],
-    [295,128,82],
-    [365,154,62],
-    [245,165,108]
-  ];
-
-  for(const [x,y,r] of blobs){
-    const g=ctx.createRadialGradient(x,y,r*.18,x,y,r);
-    g.addColorStop(0,'rgba(255,255,255,.98)');
-    g.addColorStop(.55,'rgba(255,255,255,.82)');
-    g.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.fillStyle=g;
-    ctx.beginPath();
-    ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fill();
-  }
+  const g=ctx.createRadialGradient(128,128,20,128,128,118);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(.55,'rgba(255,255,255,.92)');
+  g.addColorStop(.82,'rgba(255,255,255,.58)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,256,256);
 
   const tex=new THREE.CanvasTexture(c);
   tex.colorSpace=THREE.SRGBColorSpace;
   tex.minFilter=THREE.LinearFilter;
   tex.magFilter=THREE.LinearFilter;
-  tex.wrapS=THREE.ClampToEdgeWrapping;
-  tex.wrapT=THREE.ClampToEdgeWrapping;
   return tex;
 }
 
-function createAtmosphericClouds(){
-  const tex=makeCloudTexture();
-  const skyMatBase=new THREE.SpriteMaterial({
-    map:tex,
+function createCloudGroup(puffTexture,scale=1){
+  const group=new THREE.Group();
+  const puffMat=new THREE.SpriteMaterial({
+    map:puffTexture,
     transparent:true,
     depthWrite:false,
     depthTest:true,
-    opacity:.72,
+    opacity:.88,
     color:0xffffff
   });
 
-  const reflectionMatBase=new THREE.SpriteMaterial({
-    map:tex,
-    transparent:true,
-    depthWrite:false,
-    depthTest:true,
-    opacity:.22,
-    color:0xd8eef5
-  });
-
-  const configs=[
-    {x:-14,y:7.4,z:-10,s:7.8,speed:.28},
-    {x:-5,y:8.7,z:-12,s:9.0,speed:.18},
-    {x:5,y:7.9,z:-11,s:7.2,speed:.24},
-    {x:13,y:9.2,z:-13,s:9.6,speed:.15},
-    {x:1,y:10.2,z:-15,s:6.8,speed:.20},
-    {x:-9,y:10.6,z:-16,s:6.4,speed:.16}
+  const puffs=[
+    [-1.25,-.05,1.35],
+    [-.65,.28,1.7],
+    [0,.42,1.95],
+    [.72,.25,1.62],
+    [1.3,-.08,1.25],
+    [-.35,-.18,1.55],
+    [.42,-.20,1.5]
   ];
 
-  for(let i=0;i<configs.length;i++){
-    const cfg=configs[i];
-    const mat=skyMatBase.clone();
-    mat.opacity=.74+(i%3)*.07;
-    const cloud=new THREE.Sprite(mat);
+  for(const [x,y,s] of puffs){
+    const puff=new THREE.Sprite(puffMat.clone());
+    puff.position.set(x*scale,y*scale,0);
+    puff.scale.set(s*scale,s*.72*scale,1);
+    group.add(puff);
+  }
+  return group;
+}
+
+function createAtmosphericClouds(){
+  const tex=makeCloudPuffTexture();
+  const configs=[
+    {x:-12,y:5.3,z:-9,s:1.55,speed:.23},
+    {x:-3,y:6.0,z:-12,s:1.85,speed:.17},
+    {x:7,y:5.6,z:-10,s:1.45,speed:.21},
+    {x:15,y:6.4,z:-13,s:1.95,speed:.14},
+    {x:1,y:7.1,z:-16,s:1.35,speed:.18}
+  ];
+
+  for(const cfg of configs){
+    const cloud=createCloudGroup(tex,cfg.s);
     cloud.position.set(cfg.x,cfg.y,cfg.z);
-    cloud.scale.set(cfg.s,cfg.s*.52,1);
-    cloud.renderOrder=1;
     cloud.userData.speed=cfg.speed;
-    cloud.userData.startX=cfg.x;
     scene.add(cloud);
     skyClouds.push(cloud);
-
-    const rmat=reflectionMatBase.clone();
-    const reflection=new THREE.Sprite(rmat);
-    reflection.position.set(cfg.x,-.70,cfg.z+5.5);
-    reflection.scale.set(cfg.s*1.12,-cfg.s*.46,1);
-    reflection.renderOrder=0;
-    reflection.userData.speed=cfg.speed*.92;
-    reflection.userData.startX=cfg.x;
-    scene.add(reflection);
-    waterCloudReflections.push(reflection);
   }
+
+  // Remove the old flat reflection sprites: they read as white bars rather than reflections.
+  for(const r of waterCloudReflections)scene.remove(r);
+  waterCloudReflections.length=0;
 }
 
 function updateAtmosphericClouds(dt){
-  const minX=-22;
-  const maxX=22;
+  const minX=-20;
+  const maxX=20;
+
+  // Screen-right-ish motion: use the camera's local right direction projected onto the ground plane.
+  const right=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+  right.y=0;
+  if(right.lengthSq()<.001)right.set(1,0,0);
+  right.normalize();
 
   for(const cloud of skyClouds){
-    cloud.position.x+=cloud.userData.speed*dt;
-    if(cloud.position.x>maxX)cloud.position.x=minX;
-  }
+    cloud.position.addScaledVector(right,cloud.userData.speed*dt);
 
-  for(const reflection of waterCloudReflections){
-    reflection.position.x+=reflection.userData.speed*dt;
-    if(reflection.position.x>maxX)reflection.position.x=minX;
+    // Wrap based on radial distance from the atelier center so it stays around the visible horizon.
+    if(cloud.position.length()>28){
+      cloud.position.x=-cloud.position.x*.72;
+      cloud.position.z=-cloud.position.z*.72;
+    }
   }
 }
+
 
 function updateBoatMotion(dt){
   if(!boatMover)return;
