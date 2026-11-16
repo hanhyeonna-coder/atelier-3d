@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.7.1 · load fix</div>
+  <div id="version">controller v8.8 · slower authored boat + angled gallery + water cloud reflections</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -316,9 +316,8 @@ let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
 let extEnvMixer=null;
-const BOAT_ANIM_SPEED=.045;
-const BOAT_FACING_YAW_OFFSET=0;
-let boatLastWorldPos=new THREE.Vector3();
+const BOAT_ANIM_SPEED=.012;
+ let boatLastWorldPos=new THREE.Vector3();
 let boatFacingReady=false;
 let boatPrevPos=new THREE.Vector3();
 
@@ -339,6 +338,7 @@ const BOAT_Y=-0.75;
 const WALK_RADIUS=8.05;
 const CAMERA_RADIUS=8.95;
 const BRIDGE_HALF_WIDTH=1.15;
+const BRIDGE_ANGLE=-THREE.MathUtils.degToRad(11);
 const BRIDGE_START_Z=6.9;
 const BRIDGE_END_Z=15.8;
 const GALLERY_CENTER_Z=18.4;
@@ -748,16 +748,26 @@ function setAvatarFacing(dir){
   avatarRoot.rotation.y=Math.atan2(dir.x,dir.z)+MODEL_YAW_CORRECTION;
 }
 
+function toBridgeLocal(v){
+  const c=Math.cos(-BRIDGE_ANGLE);
+  const sn=Math.sin(-BRIDGE_ANGLE);
+  return {
+    x:v.x*c-v.z*sn,
+    z:v.x*sn+v.z*c
+  };
+}
+
 function isWalkableWorldPosition(v){
   const inPavilion=Math.hypot(v.x,v.z)<=WALK_RADIUS;
+  const p=toBridgeLocal(v);
   const onBridge=
-    Math.abs(v.x)<=BRIDGE_HALF_WIDTH &&
-    v.z>=BRIDGE_START_Z &&
-    v.z<=BRIDGE_END_Z;
+    Math.abs(p.x)<=BRIDGE_HALF_WIDTH &&
+    p.z>=BRIDGE_START_Z &&
+    p.z<=BRIDGE_END_Z;
   const onGalleryGround=
-    Math.abs(v.x)<=GALLERY_HALF_WIDTH &&
-    v.z>=GALLERY_CENTER_Z-GALLERY_HALF_DEPTH &&
-    v.z<=GALLERY_CENTER_Z+GALLERY_HALF_DEPTH;
+    Math.abs(p.x)<=GALLERY_HALF_WIDTH &&
+    p.z>=GALLERY_CENTER_Z-GALLERY_HALF_DEPTH &&
+    p.z<=GALLERY_CENTER_Z+GALLERY_HALF_DEPTH;
   return inPavilion || onBridge || onGalleryGround;
 }
 
@@ -3398,6 +3408,7 @@ Promise.all([
 function createBridgeAndGalleryLot(){
   const bridgeGroup=new THREE.Group();
   bridgeGroup.name='Gallery Bridge Prototype';
+  bridgeGroup.rotation.y=BRIDGE_ANGLE;
 
   const woodMat=new THREE.MeshStandardMaterial({
     color:0x9c6a3d,
@@ -3619,6 +3630,44 @@ function createCloudGroup(puffTexture,scale=1){
   return group;
 }
 
+function makeCloudReflectionTexture(){
+  const c=document.createElement('canvas');
+  c.width=512;
+  c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+
+  const blobs=[
+    [90,150,70,46],
+    [155,125,92,58],
+    [245,112,118,68],
+    [335,128,95,58],
+    [420,154,70,43],
+    [255,166,145,54]
+  ];
+
+  for(const [x,y,rx,ry] of blobs){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(1,ry/rx);
+    const g=ctx.createRadialGradient(0,0,rx*.15,0,0,rx);
+    g.addColorStop(0,'rgba(220,239,246,.48)');
+    g.addColorStop(.55,'rgba(205,229,238,.34)');
+    g.addColorStop(1,'rgba(190,218,229,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(0,0,rx,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  return tex;
+}
+
 function createAtmosphericClouds(){
   const tex=makeCloudPuffTexture();
 
@@ -3647,22 +3696,26 @@ function createAtmosphericClouds(){
     scene.add(cloud);
     skyClouds.push(cloud);
 
-    // A broader, darker reflection group, kept low over the exterior water ring.
-    const reflection=createCloudGroup(tex,cfg.s*1.12);
+    // Horizontal water reflection: wide, soft and visibly cloud-shaped.
+    const reflectionTex=makeCloudReflectionTexture();
+    const reflectionMat=new THREE.MeshBasicMaterial({
+      map:reflectionTex,
+      transparent:true,
+      opacity:.58,
+      depthWrite:false,
+      side:THREE.DoubleSide,
+      color:0xd5edf4
+    });
+    const reflection=new THREE.Mesh(
+      new THREE.PlaneGeometry(cfg.s*5.6,cfg.s*2.25),
+      reflectionMat
+    );
+    reflection.rotation.x=-Math.PI/2;
     reflection.position.set(
       Math.cos(cfg.a)*cfg.r,
-      -.62,
+      -.58,
       Math.sin(cfg.a)*cfg.r
     );
-    reflection.scale.y=-.72;
-    reflection.traverse(o=>{
-      if(o.material){
-        o.material=o.material.clone();
-        o.material.opacity=.34;
-        o.material.color.set(0xc2dce5);
-        o.material.depthWrite=false;
-      }
-    });
     reflection.userData.angle=cfg.a;
     reflection.userData.radius=cfg.r;
     reflection.userData.speed=cfg.speed*.9;
@@ -3691,23 +3744,8 @@ function updateAtmosphericClouds(dt){
 
 
 function updateBoatMotion(dt){
+  // Blender owns both route and orientation. Web only controls playback speed.
   if(boatMixer)boatMixer.update(dt);
-  if(!boatMover || !boatFacingReady)return;
-
-  const current=new THREE.Vector3();
-  boatMover.getWorldPosition(current);
-  const dx=current.x-boatLastWorldPos.x;
-  const dz=current.z-boatLastWorldPos.z;
-
-  if((dx*dx+dz*dz)>.000001){
-    const desiredYaw=Math.atan2(dx,dz)+BOAT_FACING_YAW_OFFSET;
-    const currentYaw=boatMover.rotation.y;
-    let delta=desiredYaw-currentYaw;
-    delta=Math.atan2(Math.sin(delta),Math.cos(delta));
-    boatMover.rotation.y=currentYaw+delta*Math.min(1,dt*5.5);
-  }
-
-  boatLastWorldPos.copy(current);
 }
 
 function tick(){
