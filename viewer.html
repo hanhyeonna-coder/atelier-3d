@@ -20,7 +20,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v4.4 · assigned player easel + click-to-sit</div>
+  <div id="workTimer">작업시간 00:00</div>
+  <div id="version">controller v4.5 · dynamic easel ownership + seat work timer</div>
 </div>
 
 <script type="importmap">
@@ -40,6 +41,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const loading=document.getElementById('loading');
 const status=document.getElementById('status');
+const workTimer=document.getElementById('workTimer');
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
@@ -92,6 +94,7 @@ let pendingPlayerSeat=null;
 let playerSeat=null;
 let mySeat=null;
 let myEaselMarker=null;
+let workElapsedSeconds=0;
 let furnitureScene=null;
 
 // NPC atelier residents.
@@ -739,7 +742,6 @@ function collectSeatSlots(furnitureRoot){
       seatTop:finalBox.max.y,
       faceDir,
       occupiedBy:null,
-      reservedForPlayer:false,
       clickRadius:0.95
     };
 
@@ -798,23 +800,6 @@ function createMyEaselMarker(seat){
   myEaselMarker=sprite;
 }
 
-function assignPlayerEasel(){
-  if(!seatSlots.length)return;
-
-  // Pick the closest available easel to the player's initial spawn.
-  let best=seatSlots[0];
-  let bestD=Infinity;
-  for(const seat of seatSlots){
-    const d=avatarRoot ? avatarRoot.position.distanceToSquared(seat.position) : seat.index;
-    if(d<bestD){bestD=d;best=seat;}
-  }
-
-  mySeat=best;
-  mySeat.reservedForPlayer=true;
-  createMyEaselMarker(mySeat);
-  console.log('Player easel assigned:',mySeat.index);
-}
-
 function makeNPCActionSet(model,clips){
   const mixer=new THREE.AnimationMixer(model);
   const actions={};
@@ -868,7 +853,7 @@ function releaseSeat(npc){
 }
 
 function reserveRandomSeat(npc){
-  const free=seatSlots.filter(s=>!s.occupiedBy && !s.reservedForPlayer);
+  const free=seatSlots.filter(s=>!s.occupiedBy);
   if(!free.length)return false;
   const seat=free[Math.floor(Math.random()*free.length)];
   seat.occupiedBy=npc;
@@ -924,7 +909,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
 
   // Make the room immediately feel occupied: two residents begin seated,
   // the rest start at separated roaming locations.
-  const freeSeats=seatSlots.filter(s=>!s.reservedForPlayer);
+  const freeSeats=seatSlots.slice();
   for(let i=0;i<Math.min(2,npcs.length,freeSeats.length);i++){
     const idx=Math.floor(Math.random()*freeSeats.length);
     const seat=freeSeats.splice(idx,1)[0];
@@ -969,11 +954,6 @@ function releasePlayerSeat(){
 
 function requestPlayerSeat(seat){
   if(!seat)return false;
-
-  if(mySeat && seat!==mySeat){
-    status.textContent='다른 사람의 이젤이에요 · 내 이젤을 클릭해 주세요';
-    return true;
-  }
 
   if(seat.occupiedBy && seat.occupiedBy!=='player'){
     status.textContent='이미 누가 앉아 있는 스툴이에요';
@@ -1229,6 +1209,21 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 
+function updateWorkTimer(dt){
+  if(playerSeat)workElapsedSeconds+=dt;
+
+  const total=Math.floor(workElapsedSeconds);
+  const hours=Math.floor(total/3600);
+  const minutes=Math.floor((total%3600)/60);
+  const seconds=total%60;
+  const mm=String(minutes).padStart(2,'0');
+  const ss=String(seconds).padStart(2,'0');
+
+  workTimer.textContent=hours>0
+    ? `작업시간 ${hours}:${mm}:${ss}`
+    : `작업시간 ${mm}:${ss}`;
+}
+
 function updateMovement(dt){
   if(!avatarRoot)return;
 
@@ -1266,10 +1261,12 @@ function updateMovement(dt){
       if(pendingPlayerSeat){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
+        mySeat=playerSeat;
+        createMyEaselMarker(mySeat);
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar('Avatar_Sit');
-        status.textContent='스툴에 앉음 · WASD 또는 바닥 클릭으로 일어나기';
+        status.textContent='내 이젤에서 작업 중 · 일어나면 타이머 일시정지';
       }else{
         playAvatar('Avatar_Idle');
       }
@@ -1424,7 +1421,6 @@ Promise.all([
   // then create independent residents from the same rigged avatar.
   if(furnitureGLB){
     collectSeatSlots(furnitureGLB.scene);
-    assignPlayerEasel();
   }
   spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
 
@@ -1437,7 +1433,7 @@ Promise.all([
   updateCamera();
 
   loading.style.display='none';
-  status.textContent='준비됨';
+  status.textContent='빈 이젤에 앉으면 그 자리가 내 이젤이 됩니다';
 }).catch(err=>{
   console.error(err);
   loading.textContent='GLB 로드 실패';
@@ -1485,6 +1481,7 @@ function tick(){
       0.035+Math.sin(performance.now()*0.0015)*0.01;
   });
 
+  updateWorkTimer(dt);
   updateMovement(dt);
   updateCamera();
 
