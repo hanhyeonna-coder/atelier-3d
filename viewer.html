@@ -52,7 +52,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 .completedItem{position:relative;background:#f3eee9;border-radius:14px;padding:8px}
 .completedItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:9px;display:block;cursor:pointer}
 .completedMeta{font-size:11px;color:#6b5a50;margin-top:6px}
-.completedDelete{position:absolute;right:14px;top:14px;width:30px;height:30px;border:0;border-radius:15px;background:rgba(55,43,35,.78);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transform:scale(.9);transition:opacity .15s ease,transform .15s ease}
+.completedDelete{position:absolute;right:12px;top:12px;width:32px;height:32px;border:0;border-radius:10px;background:rgba(34,29,26,.94);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transform:scale(.94);transition:opacity .15s ease,transform .15s ease;box-shadow:0 4px 14px rgba(0,0,0,.24)}
+.completedDelete svg{width:17px;height:17px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .completedItem:hover .completedDelete{opacity:1;transform:scale(1)}
 @media (hover:none){.completedDelete{opacity:.72;transform:scale(1)}}
 #statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
@@ -72,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.1 · animated coverflow + fluffy clouds</div>
+  <div id="version">controller v8.2 · bridge expansion + crisp trash icon</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -327,6 +328,12 @@ const BOAT_Y=-0.75;
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
 const CAMERA_RADIUS=8.95;
+const BRIDGE_HALF_WIDTH=1.15;
+const BRIDGE_START_Z=6.9;
+const BRIDGE_END_Z=15.8;
+const GALLERY_CENTER_Z=18.4;
+const GALLERY_HALF_WIDTH=5.2;
+const GALLERY_HALF_DEPTH=3.7;
 const MOVE_SPEED=1.85;
 const CENTER_BLOCK_RADIUS=1.90;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
@@ -731,14 +738,21 @@ function setAvatarFacing(dir){
   avatarRoot.rotation.y=Math.atan2(dir.x,dir.z)+MODEL_YAW_CORRECTION;
 }
 
-function clampXZ(v,radius){
-  const r=Math.hypot(v.x,v.z);
-  if(r>radius){
-    const s=radius/r;
-    v.x*=s;
-    v.z*=s;
-  }
-  return v;
+function isWalkableWorldPosition(v){
+  const inPavilion=Math.hypot(v.x,v.z)<=WALK_RADIUS;
+  const onBridge=
+    Math.abs(v.x)<=BRIDGE_HALF_WIDTH &&
+    v.z>=BRIDGE_START_Z &&
+    v.z<=BRIDGE_END_Z;
+  const onGalleryGround=
+    Math.abs(v.x)<=GALLERY_HALF_WIDTH &&
+    v.z>=GALLERY_CENTER_Z-GALLERY_HALF_DEPTH &&
+    v.z<=GALLERY_CENTER_Z+GALLERY_HALF_DEPTH;
+  return inPavilion || onBridge || onGalleryGround;
+}
+
+function constrainWalkable(next,previous){
+  return isWalkableWorldPosition(next)?next:previous.clone();
 }
 
 function recolorBeret(model,color){
@@ -2701,17 +2715,19 @@ function updateCamera(){
 
   const horizontalDir=new THREE.Vector2(Math.sin(camYaw),Math.cos(camYaw)).normalize();
 
-  // Preserve camera angle while keeping camera inside pavilion.
-  // Solve ray-circle intersection from camera focus along view offset.
   const fx=camTarget.x, fz=camTarget.z;
   const dx2=horizontalDir.x, dz2=horizontalDir.y;
-  const b=2*(fx*dx2+fz*dz2);
-  const cc=fx*fx+fz*fz-CAMERA_RADIUS*CAMERA_RADIUS;
-  const disc=Math.max(0,b*b-4*cc);
-  const maxHorizontal=(-b+Math.sqrt(disc))/2;
-
   const requestedHorizontal=Math.cos(camPitch)*camDistance;
-  const horizontal=Math.max(.35,Math.min(requestedHorizontal,maxHorizontal-.08));
+  let horizontal=requestedHorizontal;
+
+  if(Math.hypot(fx,fz)<=WALK_RADIUS+.4){
+    // Inside the pavilion, keep the old camera safety circle.
+    const b=2*(fx*dx2+fz*dz2);
+    const cc=fx*fx+fz*fz-CAMERA_RADIUS*CAMERA_RADIUS;
+    const disc=Math.max(0,b*b-4*cc);
+    const maxHorizontal=(-b+Math.sqrt(disc))/2;
+    horizontal=Math.max(.35,Math.min(requestedHorizontal,maxHorizontal-.08));
+  }
 
   const desired=new THREE.Vector3(
     camTarget.x+dx2*horizontal,
@@ -2780,8 +2796,8 @@ function setClickTarget(clientX,clientY){
   const hit=new THREE.Vector3();
   if(!raycaster.ray.intersectPlane(groundPlane,hit))return;
 
-  if(Math.hypot(hit.x,hit.z)>WALK_RADIUS){
-    showStatus('파빌리온 안쪽 바닥을 클릭해 주세요');
+  if(!isWalkableWorldPosition(hit)){
+    showStatus('파빌리온, 다리 또는 건너편 부지를 클릭해 주세요');
     return;
   }
 
@@ -3062,8 +3078,8 @@ function updateMovement(dt){
     step=Math.min(step,remaining);
   }
 
-  const next=avatarRoot.position.clone().addScaledVector(dir,step);
-  clampXZ(next,WALK_RADIUS);
+  let next=avatarRoot.position.clone().addScaledVector(dir,step);
+  next=constrainWalkable(next,avatarRoot.position);
 
   // Do not let the player walk through residents.
   if(playerCandidateBlocked(next)){
@@ -3212,6 +3228,7 @@ Promise.all([
     scene.add(flowerGLB.scene);
   }
 
+  createBridgeAndGalleryLot();
   createAtmosphericClouds();
 
   if(boatGLB){
@@ -3297,6 +3314,100 @@ Promise.all([
   loading.textContent='GLB 로드 실패';
   showStatus(String(err));
 });
+
+function createBridgeAndGalleryLot(){
+  const bridgeGroup=new THREE.Group();
+  bridgeGroup.name='Gallery Bridge Prototype';
+
+  const woodMat=new THREE.MeshStandardMaterial({
+    color:0x9c6a3d,
+    roughness:.88,
+    metalness:0
+  });
+  const railMat=new THREE.MeshStandardMaterial({
+    color:0x7d5332,
+    roughness:.92,
+    metalness:0
+  });
+  const stoneMat=new THREE.MeshStandardMaterial({
+    color:0xc8bca9,
+    roughness:.96,
+    metalness:0
+  });
+
+  const bridgeLength=BRIDGE_END_Z-BRIDGE_START_Z;
+  const bridgeMidZ=(BRIDGE_START_Z+BRIDGE_END_Z)/2;
+
+  // Main deck
+  const deck=new THREE.Mesh(
+    new THREE.BoxGeometry(BRIDGE_HALF_WIDTH*2,0.18,bridgeLength),
+    woodMat
+  );
+  deck.position.set(0,-.02,bridgeMidZ);
+  deck.receiveShadow=true;
+  deck.castShadow=true;
+  bridgeGroup.add(deck);
+
+  // Slats make the direction/readability obvious.
+  const slatGeo=new THREE.BoxGeometry(BRIDGE_HALF_WIDTH*2-.08,.06,.12);
+  for(let z=BRIDGE_START_Z+.25;z<BRIDGE_END_Z-.15;z+=.38){
+    const slat=new THREE.Mesh(slatGeo,railMat);
+    slat.position.set(0,.10,z);
+    slat.castShadow=true;
+    bridgeGroup.add(slat);
+  }
+
+  // Simple rails
+  const railGeo=new THREE.BoxGeometry(.09,.10,bridgeLength);
+  for(const x of [-BRIDGE_HALF_WIDTH+.08,BRIDGE_HALF_WIDTH-.08]){
+    const rail=new THREE.Mesh(railGeo,railMat);
+    rail.position.set(x,.72,bridgeMidZ);
+    bridgeGroup.add(rail);
+
+    for(let z=BRIDGE_START_Z+.25;z<=BRIDGE_END_Z-.2;z+=1.1){
+      const post=new THREE.Mesh(new THREE.BoxGeometry(.10,1.25,.10),railMat);
+      post.position.set(x,.35,z);
+      bridgeGroup.add(post);
+    }
+  }
+
+  // Future gallery buildable lot.
+  const lot=new THREE.Mesh(
+    new THREE.CylinderGeometry(5.8,5.8,.22,48),
+    stoneMat
+  );
+  lot.position.set(0,-.03,GALLERY_CENTER_Z);
+  lot.receiveShadow=true;
+  bridgeGroup.add(lot);
+
+  // Small marker so the destination is understandable before the gallery exists.
+  const signPost=new THREE.Mesh(new THREE.BoxGeometry(.12,1.45,.12),railMat);
+  signPost.position.set(-2.8,.62,GALLERY_CENTER_Z-1.1);
+  bridgeGroup.add(signPost);
+
+  const signCanvas=document.createElement('canvas');
+  signCanvas.width=512;
+  signCanvas.height=180;
+  const ctx=signCanvas.getContext('2d');
+  ctx.fillStyle='rgba(247,243,237,.96)';
+  ctx.fillRect(0,0,512,180);
+  ctx.fillStyle='#4b3a30';
+  ctx.font='700 46px sans-serif';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('전시관 예정지',256,90);
+  const signTex=new THREE.CanvasTexture(signCanvas);
+  signTex.colorSpace=THREE.SRGBColorSpace;
+  const sign=new THREE.Mesh(
+    new THREE.PlaneGeometry(2.55,.9),
+    new THREE.MeshBasicMaterial({map:signTex,transparent:true,side:THREE.DoubleSide})
+  );
+  sign.position.set(-2.8,1.45,GALLERY_CENTER_Z-1.1);
+  sign.rotation.y=Math.PI;
+  bridgeGroup.add(sign);
+
+  scene.add(bridgeGroup);
+}
 
 function makeCloudPuffTexture(){
   const c=document.createElement('canvas');
