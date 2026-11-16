@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v4.8 · contain artwork + paint loop + work prompts</div>
+  <div id="version">controller v4.9 · artwork front overlay + compact work prompts</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -972,15 +972,9 @@ function tryOpenArtworkOnClickedCanvas(){
   return false;
 }
 
-function makeContainedArtworkTexture(img,mesh){
-  const box=new THREE.Box3().setFromObject(mesh);
-  const size=box.getSize(new THREE.Vector3());
-
-  // Easel canvas is upright: world X/Y are its visible width/height.
-  // Preserve original image ratio and fill unused area with real canvas white.
-  const physicalAspect=Math.max(.2,Math.min(5,size.x/Math.max(size.y,.001)));
+function makeContainedArtworkTexture(img,aspect){
   const texW=1024;
-  const texH=Math.max(256,Math.round(texW/physicalAspect));
+  const texH=Math.max(256,Math.round(texW/Math.max(.2,Math.min(5,aspect))));
 
   const c=document.createElement('canvas');
   c.width=texW;
@@ -1010,6 +1004,79 @@ function makeContainedArtworkTexture(img,mesh){
   return tex;
 }
 
+function makeArtworkOverlay(mesh,img,seat){
+  mesh.geometry.computeBoundingBox();
+  const box=mesh.geometry.boundingBox.clone();
+  const size=box.getSize(new THREE.Vector3());
+  const center=box.getCenter(new THREE.Vector3());
+
+  const dims=[
+    {axis:'x',v:size.x},
+    {axis:'y',v:size.y},
+    {axis:'z',v:size.z}
+  ].sort((a,b)=>a.v-b.v);
+
+  const thin=dims[0].axis;
+  let width,height,rot=new THREE.Euler();
+  let plus=center.clone(),minus=center.clone();
+  const eps=.008;
+
+  if(thin==='z'){
+    width=size.x; height=size.y;
+    plus.z=box.max.z+eps;
+    minus.z=box.min.z-eps;
+  }else if(thin==='x'){
+    width=size.z; height=size.y;
+    rot.y=Math.PI/2;
+    plus.x=box.max.x+eps;
+    minus.x=box.min.x-eps;
+  }else{
+    width=size.x; height=size.z;
+    rot.x=-Math.PI/2;
+    plus.y=box.max.y+eps;
+    minus.y=box.min.y-eps;
+  }
+
+  mesh.updateWorldMatrix(true,false);
+  const plusWorld=mesh.localToWorld(plus.clone());
+  const minusWorld=mesh.localToWorld(minus.clone());
+  const seatWorld=seat.position.clone();
+
+  const usePlus=plusWorld.distanceToSquared(seatWorld)<=minusWorld.distanceToSquared(seatWorld);
+  const localPos=usePlus?plus:minus;
+
+  if(!usePlus){
+    if(thin==='z')rot.y=Math.PI;
+    else if(thin==='x')rot.y=-Math.PI/2;
+    else rot.x=Math.PI/2;
+  }
+
+  const aspect=width/Math.max(height,.001);
+  const tex=makeContainedArtworkTexture(img,aspect);
+  const mat=new THREE.MeshBasicMaterial({
+    map:tex,
+    side:THREE.DoubleSide,
+    toneMapped:false
+  });
+
+  const overlay=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
+  overlay.name='Artwork Overlay';
+  overlay.position.copy(localPos);
+  overlay.rotation.copy(rot);
+  overlay.renderOrder=10;
+
+  const old=mesh.getObjectByName('Artwork Overlay');
+  if(old){
+    old.geometry?.dispose?.();
+    old.material?.map?.dispose?.();
+    old.material?.dispose?.();
+    mesh.remove(old);
+  }
+
+  mesh.add(overlay);
+  return overlay;
+}
+
 function applyArtworkImage(img){
   if(!playerSeat)return;
 
@@ -1020,24 +1087,10 @@ function applyArtworkImage(img){
   }
 
   canvases.forEach(mesh=>{
-    const tex=makeContainedArtworkTexture(img,mesh);
-    const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
-    const replaced=originals.map(mat=>{
-      const m=(mat?.clone?.() || new THREE.MeshStandardMaterial());
-      m.map=tex;
-      if(m.color)m.color.set(0xffffff);
-      if('roughness' in m)m.roughness=.78;
-      if('metalness' in m)m.metalness=0;
-      m.transparent=false;
-      m.opacity=1;
-      m.needsUpdate=true;
-      return m;
-    });
-    mesh.material=Array.isArray(mesh.material)?replaced:replaced[0];
-    mesh.userData.artworkTexture=tex;
+    makeArtworkOverlay(mesh,img,playerSeat);
   });
 
-  status.textContent='작품이 원본 비율 그대로 캔버스에 올라갔어요';
+  status.textContent='작품이 캔버스 정면에 올라갔어요';
 }
 
 artUpload.addEventListener('change',()=>{
@@ -1321,7 +1374,7 @@ function ensureWorkPrompt(){
   if(workPromptSprite)return;
 
   workPromptCanvas=document.createElement('canvas');
-  workPromptCanvas.width=1024;
+  workPromptCanvas.width=16;
   workPromptCanvas.height=180;
   workPromptCtx=workPromptCanvas.getContext('2d');
   workPromptTexture=new THREE.CanvasTexture(workPromptCanvas);
@@ -1335,7 +1388,6 @@ function ensureWorkPrompt(){
   });
   workPromptSprite=new THREE.Sprite(mat);
   workPromptSprite.name='Work Prompt';
-  workPromptSprite.scale.set(3.2,.56,1);
   workPromptSprite.renderOrder=50;
   workPromptSprite.visible=false;
   scene.add(workPromptSprite);
@@ -1343,9 +1395,20 @@ function ensureWorkPrompt(){
 
 function drawWorkPrompt(text){
   ensureWorkPrompt();
+
+  const font='700 54px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
+  const measure=document.createElement('canvas').getContext('2d');
+  measure.font=font;
+
+  const textWidth=Math.ceil(measure.measureText(text).width);
+  const padX=54;
+  const w=Math.max(240,textWidth+padX*2);
+  const h=180;
+
+  workPromptCanvas.width=w;
+  workPromptCanvas.height=h;
+  workPromptCtx=workPromptCanvas.getContext('2d');
   const ctx=workPromptCtx;
-  const w=workPromptCanvas.width;
-  const h=workPromptCanvas.height;
 
   ctx.clearRect(0,0,w,h);
   ctx.fillStyle='rgba(255,255,255,.90)';
@@ -1357,11 +1420,17 @@ function drawWorkPrompt(text){
   ctx.stroke();
 
   ctx.fillStyle='#4c3a30';
-  ctx.font='700 54px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
+  ctx.font=font;
   ctx.textAlign='center';
   ctx.textBaseline='middle';
   ctx.fillText(text,w/2,h/2+1);
+
+  workPromptTexture.image=workPromptCanvas;
   workPromptTexture.needsUpdate=true;
+
+  const worldHeight=.56;
+  const worldWidth=worldHeight*(w/h);
+  workPromptSprite.scale.set(worldWidth,worldHeight,1);
 }
 
 function updateWorkPrompt(){
