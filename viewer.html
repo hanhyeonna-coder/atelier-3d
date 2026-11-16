@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.7 · reliable cross-device motion</div>
+  <div id="version">controller v6.8 · remove embedded rigged ghosts</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -1175,6 +1175,7 @@ function ensureRemoteAvatar(id,state={}){
   let entry=remoteAvatars.get(id);
   if(!entry){
     const root=new THREE.Group();
+    root.userData.remoteClientId=id;
     const model=SkeletonUtils.clone(avatarModel);
     root.add(model);
     const mixer=new THREE.AnimationMixer(model);
@@ -1310,7 +1311,18 @@ function updateProximityNameLabels(){
   if(ownLabel)ownLabel.visible=false;
 }
 
+function cleanupOrphanRemoteRoots(){
+  const valid=new Set(remoteAvatars.values());
+  for(const child of [...scene.children]){
+    const id=child?.userData?.remoteClientId;
+    if(!id)continue;
+    const mapped=remoteAvatars.get(id);
+    if(!mapped || mapped.root!==child)scene.remove(child);
+  }
+}
+
 function updateRemoteMotion(dt){
+  cleanupOrphanRemoteRoots();
   const now=performance.now();
   for(const [id,entry] of [...remoteAvatars]){
     entry.root.position.lerp(entry.targetPosition,Math.min(1,dt*10));
@@ -2378,6 +2390,23 @@ function updateMovement(dt){
   broadcastMotion();
 }
 
+function hideEmbeddedRiggedCharacters(root){
+  if(!root)return;
+  const hideRoots=new Set();
+
+  root.traverse(o=>{
+    if(!o.isSkinnedMesh)return;
+    let p=o;
+    while(p.parent && p.parent!==root)p=p.parent;
+    hideRoots.add(p);
+  });
+
+  for(const node of hideRoots){
+    node.visible=false;
+    node.userData.hiddenEmbeddedCharacter=true;
+  }
+}
+
 loadProgress();
 
 Promise.all([
@@ -2387,6 +2416,12 @@ Promise.all([
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
 ]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
+  // Non-avatar GLBs must never contribute rigged character meshes.
+  hideEmbeddedRiggedCharacters(envGLB?.scene);
+  hideEmbeddedRiggedCharacters(furnitureGLB?.scene);
+  hideEmbeddedRiggedCharacters(flowerGLB?.scene);
+  hideEmbeddedRiggedCharacters(boatGLB?.scene);
+
   // Hide stale decor/furniture baked into the environment.
   // Dedicated GLBs below are now the single source of truth.
   envGLB.scene.traverse(o=>{
