@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v4.9 · artwork front overlay + compact work prompts</div>
+  <div id="version">controller v5.0 · user-owned artwork handoff + single compact prompt</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -95,6 +95,7 @@ let moveTarget=null;
 let pendingPlayerSeat=null;
 let playerSeat=null;
 let mySeat=null;
+let playerArtworkSeat=null;
 let workElapsedSeconds=0;
 let workPromptSprite=null;
 let workPromptTexture=null;
@@ -819,6 +820,7 @@ function reserveRandomSeat(npc){
   const free=seatSlots.filter(s=>!s.occupiedBy);
   if(!free.length)return false;
   const seat=free[Math.floor(Math.random()*free.length)];
+  if(playerArtworkSeat===seat)clearArtworkFromSeat(seat);
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.target=seat.position.clone();
@@ -828,6 +830,7 @@ function reserveRandomSeat(npc){
 }
 
 function placeNPCSeated(npc,seat){
+  if(playerArtworkSeat===seat)clearArtworkFromSeat(seat);
   seat.occupiedBy=npc;
   npc.seat=seat;
   npc.root.position.copy(seat.position);
@@ -1077,8 +1080,26 @@ function makeArtworkOverlay(mesh,img,seat){
   return overlay;
 }
 
+function clearArtworkFromSeat(seat){
+  if(!seat)return;
+  const canvases=getCanvasMeshesForSeat(seat);
+  canvases.forEach(mesh=>{
+    const old=mesh.getObjectByName('Artwork Overlay');
+    if(!old)return;
+    old.geometry?.dispose?.();
+    old.material?.map?.dispose?.();
+    old.material?.dispose?.();
+    mesh.remove(old);
+  });
+  if(playerArtworkSeat===seat)playerArtworkSeat=null;
+}
+
 function applyArtworkImage(img){
   if(!playerSeat)return;
+
+  if(playerArtworkSeat && playerArtworkSeat!==playerSeat){
+    clearArtworkFromSeat(playerArtworkSeat);
+  }
 
   const canvases=getCanvasMeshesForSeat(playerSeat);
   if(!canvases.length){
@@ -1090,6 +1111,7 @@ function applyArtworkImage(img){
     makeArtworkOverlay(mesh,img,playerSeat);
   });
 
+  playerArtworkSeat=playerSeat;
   status.textContent='작품이 캔버스 정면에 올라갔어요';
 }
 
@@ -1401,14 +1423,14 @@ function drawWorkPrompt(text){
   measure.font=font;
 
   const textWidth=Math.ceil(measure.measureText(text).width);
-  const padX=54;
-  const w=Math.max(240,textWidth+padX*2);
+  const padX=48;
+  const w=Math.max(220,textWidth+padX*2);
   const h=180;
 
-  workPromptCanvas.width=w;
-  workPromptCanvas.height=h;
-  workPromptCtx=workPromptCanvas.getContext('2d');
-  const ctx=workPromptCtx;
+  const c=document.createElement('canvas');
+  c.width=w;
+  c.height=h;
+  const ctx=c.getContext('2d');
 
   ctx.clearRect(0,0,w,h);
   ctx.fillStyle='rgba(255,255,255,.90)';
@@ -1425,8 +1447,18 @@ function drawWorkPrompt(text){
   ctx.textBaseline='middle';
   ctx.fillText(text,w/2,h/2+1);
 
-  workPromptTexture.image=workPromptCanvas;
-  workPromptTexture.needsUpdate=true;
+  const freshTexture=new THREE.CanvasTexture(c);
+  freshTexture.colorSpace=THREE.SRGBColorSpace;
+  freshTexture.needsUpdate=true;
+
+  const oldTexture=workPromptSprite.material.map;
+  workPromptSprite.material.map=freshTexture;
+  workPromptSprite.material.needsUpdate=true;
+  if(oldTexture)oldTexture.dispose();
+
+  workPromptTexture=freshTexture;
+  workPromptCanvas=c;
+  workPromptCtx=ctx;
 
   const worldHeight=.56;
   const worldWidth=worldHeight*(w/h);
