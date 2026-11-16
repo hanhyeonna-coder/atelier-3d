@@ -21,8 +21,9 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v4.6 · dynamic easel ownership + seat work timer</div>
+  <div id="version">controller v4.7 · canvas image upload on active easel</div>
 </div>
+<input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
 <script type="importmap">
 {
@@ -42,6 +43,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 const loading=document.getElementById('loading');
 const status=document.getElementById('status');
 const workTimer=document.getElementById('workTimer');
+const artUpload=document.getElementById('artUpload');
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
@@ -907,6 +909,113 @@ function releasePlayerSeat(){
   pendingPlayerSeat=null;
 }
 
+function isCanvasMesh(o){
+  if(!o?.isMesh)return false;
+  const objectName=(o.name||'').toLowerCase();
+  const mats=Array.isArray(o.material)?o.material:[o.material];
+  return (
+    objectName.includes('canvas') ||
+    objectName.includes('painting') ||
+    objectName.includes('artwork') ||
+    mats.some(m=>(m?.name||'').toLowerCase()==='canvas')
+  );
+}
+
+function getCanvasMeshesForSeat(seat){
+  const meshes=[];
+  seat?.easel?.traverse(o=>{
+    if(isCanvasMesh(o))meshes.push(o);
+  });
+  return meshes;
+}
+
+function openArtworkPickerForSeat(seat){
+  if(!playerSeat || seat!==playerSeat){
+    status.textContent='이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요';
+    return true;
+  }
+
+  const canvases=getCanvasMeshesForSeat(seat);
+  if(!canvases.length){
+    status.textContent='이 이젤의 캔버스 메시를 찾지 못했어요';
+    return true;
+  }
+
+  artUpload.value='';
+  artUpload.click();
+  return true;
+}
+
+function tryOpenArtworkOnClickedCanvas(){
+  if(!furnitureScene || !playerSeat)return false;
+
+  const hits=raycaster.intersectObject(furnitureScene,true);
+  for(const hit of hits){
+    let o=hit.object;
+    let seat=null;
+    let p=o;
+    while(p){
+      if(p.userData?.seatSlot){seat=p.userData.seatSlot;break;}
+      p=p.parent;
+    }
+
+    if(seat===playerSeat && isCanvasMesh(o)){
+      return openArtworkPickerForSeat(seat);
+    }
+  }
+  return false;
+}
+
+function applyArtworkImage(img){
+  if(!playerSeat)return;
+
+  const canvases=getCanvasMeshesForSeat(playerSeat);
+  if(!canvases.length){
+    status.textContent='캔버스 메시를 찾지 못했어요';
+    return;
+  }
+
+  const tex=new THREE.Texture(img);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.needsUpdate=true;
+
+  canvases.forEach(mesh=>{
+    const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+    const replaced=originals.map(mat=>{
+      const m=(mat?.clone?.() || new THREE.MeshStandardMaterial());
+      m.map=tex;
+      if(m.color)m.color.set(0xffffff);
+      if('roughness' in m)m.roughness=.72;
+      if('metalness' in m)m.metalness=0;
+      m.transparent=false;
+      m.opacity=1;
+      m.needsUpdate=true;
+      return m;
+    });
+    mesh.material=Array.isArray(mesh.material)?replaced:replaced[0];
+    mesh.userData.artworkTexture=tex;
+  });
+
+  status.textContent='작품이 캔버스에 올라갔어요';
+}
+
+artUpload.addEventListener('change',()=>{
+  const file=artUpload.files?.[0];
+  if(!file || !playerSeat)return;
+
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{
+    applyArtworkImage(img);
+    URL.revokeObjectURL(url);
+  };
+  img.onerror=()=>{
+    URL.revokeObjectURL(url);
+    status.textContent='이미지를 불러오지 못했어요';
+  };
+  img.src=url;
+});
+
 function requestPlayerSeat(seat){
   if(!seat)return false;
 
@@ -1091,7 +1200,10 @@ function setClickTarget(clientX,clientY){
 
   raycaster.setFromCamera(pointer,camera);
 
-  // My stool/easel gets priority over the floor: click either to walk there and sit.
+  // While seated, clicking the active canvas opens artwork upload.
+  if(tryOpenArtworkOnClickedCanvas())return;
+
+  // Stool/easel gets priority over the floor: click either to walk there and sit.
   if(trySitOnClickedStool())return;
 
   const hit=new THREE.Vector3();
