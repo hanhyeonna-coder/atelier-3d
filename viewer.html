@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.2 · painter names + unique hats + friendly timer</div>
+  <div id="version">controller v6.3 · live walking + lock handoff</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -148,6 +148,8 @@ if(!displayName){
 const remoteAvatars=new Map();
 let realtimeChannel=null;
 let heartbeatTimer=null;
+let lastMotionSentAt=0;
+const remoteMotion=new Map();
 
 let avatarRoot=null;
 let avatarModel=null;
@@ -1031,32 +1033,22 @@ function syncRemoteAvatars(){
   }
 
   for(const [id,entry] of remoteAvatars){
-    if(!wanted.has(id))disposeRemoteAvatar(entry);
+    const motion=remoteMotion.get(id);
+    if(!wanted.has(id) && (!motion || performance.now()-(motion.receivedAt||0)>4000))disposeRemoteAvatar(entry);
   }
 
   for(const [id,seat] of wanted){
-    let entry=remoteAvatars.get(id);
-    if(!entry){
-      const root=new THREE.Group();
-      const model=SkeletonUtils.clone(avatarModel);
-      root.add(model);
-      const {mixer,actions}=makeNPCActionSet(model,Object.keys(avatarActions).length?[]:[]);
-      // create actions directly from uploaded animation clips kept below
-      const mixer2=new THREE.AnimationMixer(model);
-      const actions2={};
-      window.__atelierAvatarClips?.forEach(clip=>actions2[clip.name]=mixer2.clipAction(clip));
-      const action=actions2['Avatar_Paint']||actions2['Avatar_Sit'];
-      action?.reset().play();
-      root.position.copy(seat.position);
-      root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
-      recolorBeret(model,hatColorForSeatIndex(seat.index));
-      scene.add(root);
-      entry={clientId:id,root,model,mixer:mixer2,actions:actions2};
-      remoteAvatars.set(id,entry);
-    }else{
-      recolorBeret(entry.model,hatColorForSeatIndex(seat.index));
+    let entry=ensureRemoteAvatar(id,{seatIndex:seat.index});
+    if(!entry)continue;
+    recolorBeret(entry.model,hatColorForSeatIndex(seat.index));
+
+    const motion=remoteMotion.get(id);
+    if(!motion || motion.state==='working'){
+      entry.targetPosition.copy(seat.position);
+      entry.targetYaw=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
       entry.root.position.copy(seat.position);
-      entry.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
+      entry.root.rotation.y=entry.targetYaw;
+      playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
     }
   }
 }
@@ -1085,17 +1077,21 @@ function clearServerArtworkVisuals(){
 function applyServerArtworks(rows){
   clearServerArtworkVisuals();
 
+  const bySeat=new Map(rows.map(r=>[r.seat_index,r]));
   for(const seat of seatSlots){
-    seat.serverArtworkOwner=null;
+    const row=bySeat.get(seat.index);
+    seat.serverArtworkOwner=row?.owner_id||null;
+    seat.artworkLockedUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
     if(!seat.userData)seat.userData={};
+    if(!row){
+      delete seat.userData.artworkDataUrl;
+      delete seat.userData.artworkMeta;
+    }
   }
 
   for(const row of rows){
     const seat=seatSlots.find(s=>s.index===row.seat_index);
     if(!seat)continue;
-
-    seat.serverArtworkOwner=row.owner_id;
-    seat.artworkLockedUntil=row.locked_until?new Date(row.locked_until).getTime():0;
 
     if(row.owner_id===clientId)continue;
 
@@ -1107,12 +1103,98 @@ function applyServerArtworks(rows){
   }
 }
 
+function ensureRemoteAvatar(id,state={}){
+  if(id===clientId || !avatarModel)return null;
+  let entry=remoteAvatars.get(id);
+  if(!entry){
+    const root=new THREE.Group();
+    const model=SkeletonUtils.clone(avatarModel);
+    root.add(model);
+    const mixer=new THREE.AnimationMixer(model);
+    const actions={};
+    window.__atelierAvatarClips?.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
+    scene.add(root);
+    entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0};
+    remoteAvatars.set(id,entry);
+  }
+  if(Number.isFinite(state.seatIndex))recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
+  return entry;
+}
+
+function playRemote(entry,name){
+  const next=entry?.actions?.[name];
+  if(!next || entry.current===next)return;
+  next.reset().play();
+  if(entry.current)entry.current.crossFadeTo(next,.12,false);
+  entry.current=next;
+}
+
+function handleRemoteMotion(message){
+  const p=message?.payload;
+  if(!p || p.clientId===clientId || !Number.isFinite(p.x) || !Number.isFinite(p.z))return;
+
+  remoteMotion.set(p.clientId,{...p,receivedAt:performance.now()});
+  const entry=ensureRemoteAvatar(p.clientId,{seatIndex:p.seatIndex});
+  if(!entry)return;
+
+  entry.targetPosition.set(p.x,0,p.z);
+  entry.targetYaw=Number.isFinite(p.yaw)?p.yaw:entry.root.rotation.y;
+  entry.lastMotionAt=performance.now();
+
+  if(p.state==='working')playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+  else if(p.state==='walking')playRemote(entry,'Avatar_Walk');
+  else playRemote(entry,'Avatar_Idle');
+}
+
+function broadcastMotion(force=false){
+  if(!realtimeChannel || !avatarRoot)return;
+  const now=performance.now();
+  if(!force && now-lastMotionSentAt<100)return;
+  lastMotionSentAt=now;
+
+  const state=playerSeat?'working':((moveTarget||keys.size)?'walking':'idle');
+  realtimeChannel.send({
+    type:'broadcast',
+    event:'motion',
+    payload:{
+      clientId,
+      x:avatarRoot.position.x,
+      z:avatarRoot.position.z,
+      yaw:avatarRoot.rotation.y,
+      state,
+      seatIndex:playerSeat?.index ?? pendingPlayerSeat?.index ?? null,
+      displayName
+    }
+  });
+}
+
+function updateRemoteMotion(dt){
+  const now=performance.now();
+  for(const [id,entry] of remoteAvatars){
+    const motion=remoteMotion.get(id);
+    if(!motion)continue;
+
+    entry.root.position.lerp(entry.targetPosition,Math.min(1,dt*12));
+    let delta=entry.targetYaw-entry.root.rotation.y;
+    delta=Math.atan2(Math.sin(delta),Math.cos(delta));
+    entry.root.rotation.y+=delta*Math.min(1,dt*12);
+
+    if(now-entry.lastMotionAt>4000 && !seatSlots.some(seat=>seat.serverOccupant===id)){
+      disposeRemoteAvatar(entry);
+      remoteMotion.delete(id);
+    }
+  }
+}
+
 function startRealtimeSync(){
   if(realtimeChannel)return;
   realtimeChannel=supabase.channel('atelier-live')
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_easels'},fetchServerState)
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_artworks'},fetchServerState)
-    .subscribe();
+    .on('broadcast',{event:'motion'},handleRemoteMotion)
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED')broadcastMotion(true);
+    });
 }
 
 async function serverClaimSeat(seat){
@@ -1143,6 +1225,15 @@ async function serverHeartbeat(){
 
 async function syncArtworkToServer(){
   if(!playerSeat || !savedArtworkDataUrl)return;
+
+  // Moving the artwork to a new easel ends the old easel's exhibition immediately.
+  for(const seat of seatSlots){
+    if(seat.index!==playerSeat.index && seat.serverArtworkOwner===clientId){
+      seat.artworkLockedUntil=0;
+      seat.serverArtworkOwner=null;
+    }
+  }
+
   await supabase.from('atelier_artworks').delete().eq('owner_id',clientId);
   await supabase.from('atelier_artworks').upsert({
     owner_id:clientId,
@@ -2176,6 +2267,7 @@ function updateMovement(dt){
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
         showStatus('내 이젤에서 작업 중 · 일어나면 타이머 일시정지');
+        broadcastMotion(true);
       }else{
         playAvatar('Avatar_Idle');
       }
@@ -2187,9 +2279,11 @@ function updateMovement(dt){
     if(playerSeat){
       const seatedAction=avatarActions['Avatar_Paint']||avatarActions['Avatar_Sit'];
       if(currentAction!==seatedAction)playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+      broadcastMotion();
       return;
     }
     if(currentAction===avatarActions['Avatar_Walk'])playAvatar('Avatar_Idle');
+    broadcastMotion();
     return;
   }
 
@@ -2213,6 +2307,7 @@ function updateMovement(dt){
 
   avatarRoot.position.copy(next);
   playAvatar('Avatar_Walk');
+  broadcastMotion();
 }
 
 loadProgress();
