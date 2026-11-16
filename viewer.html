@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.2.1 · locale init fix</div>
+  <div id="version">controller v9.3 · localized player names</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -249,8 +249,10 @@ let currentUser=null;
 let artworkSaveQueue=Promise.resolve();
 let progressSlides=[];
 let progressSlideIndex=0;
-const ARTIST_NAMES=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
-const ARTIST_QUIRKS=['Coffee-Cold','Cloud-Counting','Sleepy-Eyed','Paint-Smudged','Window-Gazing','Brush-Lost','Humming','One-Sock-Missing','Daydreaming','Pencil-Chewing','Yawning','Hungry','Stretching','Blue-Mood','Moon-Watching'];
+const ARTIST_NAMES_KO=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
+const ARTIST_QUIRKS_KO=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
+const ARTIST_NAMES_EN=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
+const ARTIST_QUIRKS_EN=['Toe-Tapping','Itchy-Eared','Sleepy-Eyed','Coffee-Cold','Brush-Lost','Window-Gazing','Holding-a-Yawn','Humming','One-Sock-Missing','Hungry','Daydreaming','Paint-Smudged','Stretching','Pencil-Chewing','Cloud-Counting'];
 
 function hashString(str){
   let h=2166136261;
@@ -262,15 +264,21 @@ function hashString(str){
 }
 
 const DISPLAY_NAME_KEY='atelier3d_display_name';
-function makeEnglishDisplayName(id){
+function makeLocalizedDisplayName(id){
   const h=hashString(id);
-  const artist=ARTIST_NAMES[h%ARTIST_NAMES.length];
-  const quirk=ARTIST_QUIRKS[Math.floor(h/ARTIST_NAMES.length)%ARTIST_QUIRKS.length];
+  const names=IS_KO?ARTIST_NAMES_KO:ARTIST_NAMES_EN;
+  const quirks=IS_KO?ARTIST_QUIRKS_KO:ARTIST_QUIRKS_EN;
+  const artist=names[h%names.length];
+  const quirk=quirks[Math.floor(h/names.length)%quirks.length];
   return `${quirk} ${artist}`;
 }
 let displayName=localStorage.getItem(DISPLAY_NAME_KEY);
-if(!displayName || /[가-힣]/.test(displayName)){
-  displayName=makeEnglishDisplayName(clientId);
+const needsLocaleRefresh=
+  !displayName ||
+  (IS_KO && !/[가-힣]/.test(displayName)) ||
+  (!IS_KO && /[가-힣]/.test(displayName));
+if(needsLocaleRefresh){
+  displayName=makeLocalizedDisplayName(clientId);
   localStorage.setItem(DISPLAY_NAME_KEY,displayName);
 }
 const remoteAvatars=new Map();
@@ -1595,19 +1603,18 @@ async function adoptGuestDataIntoAccount(user){
   if(profileError)console.warn('profile lookup',profileError);
 
   if(profile?.display_name){
-    if(/[가-힣]/.test(profile.display_name)){
-      displayName=makeEnglishDisplayName(user.id);
+    displayName=makeLocalizedDisplayName(user.id);
+    localStorage.setItem(DISPLAY_NAME_KEY,displayName);
+    if(profile.display_name!==displayName){
       const {error:profileRenameError}=await supabase
         .from('atelier_profiles')
         .update({display_name:displayName})
         .eq('user_id',user.id);
-      if(profileRenameError)console.warn('profile rename',profileRenameError);
-    }else{
-      displayName=profile.display_name;
+      if(profileRenameError)console.warn('profile localized rename',profileRenameError);
     }
-    localStorage.setItem(DISPLAY_NAME_KEY,displayName);
   }else{
-    if(/[가-힣]/.test(displayName))displayName=makeEnglishDisplayName(user.id);
+    displayName=makeLocalizedDisplayName(user.id);
+    localStorage.setItem(DISPLAY_NAME_KEY,displayName);
     const {error:profileInsertError}=await supabase
       .from('atelier_profiles')
       .insert({user_id:user.id,display_name:displayName});
