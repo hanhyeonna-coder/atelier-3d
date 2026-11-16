@@ -68,7 +68,7 @@ const artMeta=document.getElementById('artMeta');
 const artClose=document.getElementById('artClose');
 let statusHideTimer=null;
 function showStatus(message,ms=2200){
-  showStatus(message);
+  status.textContent=message;
   status.classList.add('show');
   clearTimeout(statusHideTimer);
   statusHideTimer=setTimeout(()=>status.classList.remove('show'),ms);
