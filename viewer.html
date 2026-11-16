@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.6 · very slow boat + ring clouds + ghost cleanup</div>
+  <div id="version">controller v8.7 · single boat source</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -1122,7 +1122,36 @@ function playerCandidateBlocked(candidate,minDistance=.64){
 }
 
 async function fetchServerState(){
-  const [{data:easels,error:e1},{data:artworks,error:e2},{data:presence,error:e3}]=await Promise.all([
+  const [{data:easels,error:e1},{data:artworks,error:e2},{data:presence,error:e3}]=await function stripEmbeddedBoatFromExternalEnvironment(extGLB){
+  if(!extGLB?.scene)return;
+
+  const boatRoots=[];
+  extGLB.scene.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    if(n.includes('boat'))boatRoots.push(o);
+  });
+
+  // Hide/remove boat objects embedded in the external environment.
+  for(const root of boatRoots){
+    root.traverse(o=>{o.visible=false;});
+  }
+
+  // Remove animation tracks that target any object/path containing "boat".
+  if(Array.isArray(extGLB.animations)){
+    extGLB.animations=extGLB.animations
+      .map(clip=>{
+        const tracks=clip.tracks.filter(track=>!(track.name||'').toLowerCase().includes('boat'));
+        if(!tracks.length)return null;
+        const clean=clip.clone();
+        clean.tracks=tracks;
+        clean.resetDuration();
+        return clean;
+      })
+      .filter(Boolean);
+  }
+}
+
+Promise.all([
     supabase.from('atelier_easels').select('*').order('seat_index'),
     supabase.from('atelier_artworks').select('*').order('seat_index'),
     supabase.from('atelier_presence').select('*')
@@ -3225,6 +3254,7 @@ Promise.all([
   scene.add(envGLB.scene);
 
   if(extEnvGLB){
+    stripEmbeddedBoatFromExternalEnvironment(extEnvGLB);
     enhanceMaterials(extEnvGLB.scene);
     scene.add(extEnvGLB.scene);
 
