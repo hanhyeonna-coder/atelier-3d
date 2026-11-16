@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.3 · live walking + lock handoff</div>
+  <div id="version">controller v6.4 · ghost-seat cleanup + names + motion fallback</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -148,6 +148,7 @@ if(!displayName){
 const remoteAvatars=new Map();
 let realtimeChannel=null;
 let heartbeatTimer=null;
+let presencePulseTimer=null;
 let lastMotionSentAt=0;
 const remoteMotion=new Map();
 
@@ -989,21 +990,26 @@ function playerCandidateBlocked(candidate,minDistance=.64){
 }
 
 async function fetchServerState(){
-  const [{data:easels,error:e1},{data:artworks,error:e2}]=await Promise.all([
+  const [{data:easels,error:e1},{data:artworks,error:e2},{data:presence,error:e3}]=await Promise.all([
     supabase.from('atelier_easels').select('*').order('seat_index'),
-    supabase.from('atelier_artworks').select('*').order('seat_index')
+    supabase.from('atelier_artworks').select('*').order('seat_index'),
+    supabase.from('atelier_presence').select('*')
   ]);
   if(e1)console.warn('easel sync',e1);
   if(e2)console.warn('artwork sync',e2);
+  if(e3)console.warn('presence sync',e3);
   if(easels)applyServerEasels(easels);
   if(artworks)applyServerArtworks(artworks);
+  if(presence)applyPresenceRows(presence);
 }
 
 function applyServerEasels(rows){
   const byIndex=new Map(rows.map(r=>[r.seat_index,r]));
   for(const seat of seatSlots){
     const row=byIndex.get(seat.index);
-    seat.serverOccupant=row?.occupant_id||null;
+    const heartbeatMs=row?.heartbeat_at?new Date(row.heartbeat_at).getTime():0;
+    const fresh=row?.occupant_id && heartbeatMs && Date.now()-heartbeatMs<22000;
+    seat.serverOccupant=fresh?row.occupant_id:null;
 
     // A real remote user always wins over a local decorative NPC.
     if(seat.serverOccupant && seat.serverOccupant!==clientId && seat.occupiedBy && seat.occupiedBy!=='player'){
@@ -1103,6 +1109,58 @@ function applyServerArtworks(rows){
   }
 }
 
+function makeNameLabel(text){
+  const font='700 42px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
+  const measure=document.createElement('canvas').getContext('2d');
+  measure.font=font;
+  const textWidth=Math.ceil(measure.measureText(text).width);
+  const w=Math.max(260,textWidth+72);
+  const h=96;
+
+  const c=document.createElement('canvas');
+  c.width=w;
+  c.height=h;
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,255,255,.92)';
+  ctx.strokeStyle='rgba(78,58,46,.22)';
+  ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.roundRect(8,8,w-16,h-16,34);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle='#49382f';
+  ctx.font=font;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(text,w/2,h/2+1);
+
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  const mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false,depthWrite:false});
+  const sprite=new THREE.Sprite(mat);
+  sprite.name='Player Name Label';
+  const worldH=.34;
+  sprite.scale.set(worldH*(w/h),worldH,1);
+  sprite.position.set(0,2.15,0);
+  sprite.renderOrder=100;
+  sprite.userData.labelText=text;
+  return sprite;
+}
+
+function setAvatarNameLabel(root,text){
+  if(!root || !text)return;
+  const old=root.getObjectByName('Player Name Label');
+  if(old?.userData?.labelText===text)return;
+  if(old){
+    old.material?.map?.dispose?.();
+    old.material?.dispose?.();
+    root.remove(old);
+  }
+  root.add(makeNameLabel(text));
+}
+
 function ensureRemoteAvatar(id,state={}){
   if(id===clientId || !avatarModel)return null;
   let entry=remoteAvatars.get(id);
@@ -1115,9 +1173,11 @@ function ensureRemoteAvatar(id,state={}){
     window.__atelierAvatarClips?.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
     scene.add(root);
     entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0};
+    setAvatarNameLabel(root,state.displayName||'이름 없는 화가');
     remoteAvatars.set(id,entry);
   }
   if(Number.isFinite(state.seatIndex))recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
+  if(state.displayName)setAvatarNameLabel(entry.root,state.displayName);
   return entry;
 }
 
@@ -1129,12 +1189,57 @@ function playRemote(entry,name){
   entry.current=next;
 }
 
+function applyPresenceRows(rows){
+  const now=Date.now();
+  for(const row of rows){
+    if(!row || row.client_id===clientId)continue;
+    const lastSeen=row.last_seen?new Date(row.last_seen).getTime():0;
+    if(!lastSeen || now-lastSeen>10000)continue;
+    if(!Number.isFinite(row.x) || !Number.isFinite(row.z))continue;
+
+    const entry=ensureRemoteAvatar(row.client_id,{
+      seatIndex:row.seat_index,
+      displayName:row.display_name
+    });
+    if(!entry)continue;
+
+    entry.targetPosition.set(row.x,0,row.z);
+    if(Number.isFinite(row.yaw))entry.targetYaw=row.yaw;
+    entry.lastMotionAt=performance.now();
+
+    if(row.state==='working')playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+    else if(row.state==='walking')playRemote(entry,'Avatar_Walk');
+    else playRemote(entry,'Avatar_Idle');
+  }
+}
+
+function handlePresenceChange(payload){
+  const row=payload?.new;
+  if(row)applyPresenceRows([row]);
+}
+
+async function serverPresencePulse(){
+  if(!avatarRoot)return;
+  const state=playerSeat?'working':((moveTarget||keys.size)?'walking':'idle');
+  await supabase.from('atelier_presence').upsert({
+    client_id:clientId,
+    seat_index:playerSeat?.index ?? null,
+    state,
+    work_seconds:Math.floor(workElapsedSeconds),
+    display_name:displayName,
+    x:avatarRoot.position.x,
+    z:avatarRoot.position.z,
+    yaw:avatarRoot.rotation.y,
+    last_seen:new Date().toISOString()
+  });
+}
+
 function handleRemoteMotion(message){
   const p=message?.payload;
   if(!p || p.clientId===clientId || !Number.isFinite(p.x) || !Number.isFinite(p.z))return;
 
   remoteMotion.set(p.clientId,{...p,receivedAt:performance.now()});
-  const entry=ensureRemoteAvatar(p.clientId,{seatIndex:p.seatIndex});
+  const entry=ensureRemoteAvatar(p.clientId,{seatIndex:p.seatIndex,displayName:p.displayName});
   if(!entry)return;
 
   entry.targetPosition.set(p.x,0,p.z);
@@ -1188,9 +1293,10 @@ function updateRemoteMotion(dt){
 
 function startRealtimeSync(){
   if(realtimeChannel)return;
-  realtimeChannel=supabase.channel('atelier-live')
+  realtimeChannel=supabase.channel('atelier-live',{config:{broadcast:{self:false,ack:false}}})
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_easels'},fetchServerState)
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_artworks'},fetchServerState)
+    .on('postgres_changes',{event:'*',schema:'public',table:'atelier_presence'},handlePresenceChange)
     .on('broadcast',{event:'motion'},handleRemoteMotion)
     .subscribe(status=>{
       if(status==='SUBSCRIBED')broadcastMotion(true);
@@ -2204,7 +2310,8 @@ function formatTodayWork(seconds){
   const totalMinutes=Math.floor(Math.max(0,seconds)/60);
   const hours=Math.floor(totalMinutes/60);
   const minutes=totalMinutes%60;
-  return `${String(hours).padStart(2,'0')}시간 ${String(minutes).padStart(2,'0')}분`;
+  if(hours<=0)return `${minutes}분`;
+  return `${hours}시간 ${minutes}분`;
 }
 
 function updateWorkTimer(dt){
@@ -2415,6 +2522,7 @@ Promise.all([
   enhanceMaterials(avatarModel);
   avatarRoot.add(avatarModel);
   normalizeAvatarOrigin(avatarModel);
+  setAvatarNameLabel(avatarRoot,displayName);
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   window.__atelierAvatarClips=avGLB.animations;
@@ -2437,6 +2545,8 @@ Promise.all([
   await fetchServerState();
   startRealtimeSync();
   heartbeatTimer=setInterval(serverHeartbeat,5000);
+  presencePulseTimer=setInterval(serverPresencePulse,1000);
+  serverPresencePulse();
 
   cameraFocus.set(
     avatarRoot.position.x,
@@ -2507,6 +2617,7 @@ tick();
 
 addEventListener('beforeunload',()=>{
   saveProgress();
+  supabase.from('atelier_presence').delete().eq('client_id',clientId);
   if(playerSeat){
     navigator.sendBeacon?.(
       SUPABASE_URL+'/rest/v1/rpc/atelier_release_easel',
