@@ -33,6 +33,11 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 .historyItem{background:#f7f3ef;border-radius:14px;padding:9px}
 .historyItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:white;border-radius:9px;display:block}
 .historyMeta{font-size:11px;color:#6b5a50;margin-top:7px;line-height:1.35}
+#completedTitle{margin-top:22px;margin-bottom:10px;font-size:14px;font-weight:900;color:#42362f}
+#completedGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
+.completedItem{background:#f3eee9;border-radius:14px;padding:8px}
+.completedItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:9px;display:block}
+.completedMeta{font-size:11px;color:#6b5a50;margin-top:6px}
 #completeWorkBtn{display:block;width:100%;margin:18px 0 0;border:0;border-radius:14px;padding:12px 14px;background:#5d493d;color:white;font-weight:900;cursor:pointer}
 #completeWorkBtn:disabled{opacity:.4;cursor:default}
 #statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
@@ -52,7 +57,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.5 · account sync + queued progress saves</div>
+  <div id="version">controller v7.6 · accounts + completed work archive</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -72,6 +77,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
     <div id="historySummary">내 작업 기록</div>
     <div id="historyGrid"></div>
     <button id="completeWorkBtn">이 작품을 완성하고 기록 보관하기</button>
+    <div id="completedTitle">완성 작품 보관함</div>
+    <div id="completedGrid"></div>
   </div>
 </div>
 <div id="accountModal">
@@ -117,6 +124,7 @@ const historyClose=document.getElementById('historyClose');
 const historySummary=document.getElementById('historySummary');
 const historyGrid=document.getElementById('historyGrid');
 const completeWorkBtn=document.getElementById('completeWorkBtn');
+const completedGrid=document.getElementById('completedGrid');
 const accountBtn=document.getElementById('accountBtn');
 const accountModal=document.getElementById('accountModal');
 const accountClose=document.getElementById('accountClose');
@@ -1642,8 +1650,8 @@ async function completeCurrentWork(){
 
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  historyModal.classList.remove('show');
   showStatus('작품을 완성했어요 · 다음 업로드부터 새 작품으로 시작해요',3200);
+  await loadMyHistory();
 }
 
 completeWorkBtn.addEventListener('click',completeCurrentWork);
@@ -1667,7 +1675,13 @@ async function loadMyHistory(){
   const workId=await findActiveWork();
   completeWorkBtn.disabled=!workId;
 
-  const [{data:history,error:hErr},{data:daily,error:dErr}]=await Promise.all([
+  completedGrid.innerHTML='';
+
+  const [
+    {data:history,error:hErr},
+    {data:daily,error:dErr},
+    {data:completed,error:cErr}
+  ]=await Promise.all([
     workId
       ? supabase.from('atelier_artwork_history')
           .select('*')
@@ -1679,11 +1693,17 @@ async function loadMyHistory(){
       .select('*')
       .eq('owner_id',ownerId)
       .eq('work_date',localDateKey())
-      .maybeSingle()
+      .maybeSingle(),
+    supabase.from('atelier_works')
+      .select('*')
+      .eq('owner_id',ownerId)
+      .eq('status','completed')
+      .order('completed_at',{ascending:false})
+      .limit(50)
   ]);
 
-  if(hErr || dErr){
-    console.warn(hErr||dErr);
+  if(hErr || dErr || cErr){
+    console.warn(hErr||dErr||cErr);
     historySummary.textContent='기록을 불러오지 못했어요';
     return;
   }
@@ -1711,6 +1731,29 @@ async function loadMyHistory(){
 
     card.append(img,meta);
     historyGrid.appendChild(card);
+  }
+
+  if(!completed?.length){
+    completedGrid.innerHTML='<div style="color:#8a7b72;font-size:12px">아직 완성한 작품이 없어요.</div>';
+  }else{
+    for(const work of completed){
+      const card=document.createElement('div');
+      card.className='completedItem';
+
+      const img=document.createElement('img');
+      img.src=work.cover_image_url||'';
+      img.alt='완성 작품';
+
+      const meta=document.createElement('div');
+      meta.className='completedMeta';
+      const when=work.completed_at?new Date(work.completed_at):null;
+      meta.textContent=when
+        ? `${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`
+        : formatTodayWork(work.total_work_seconds||0);
+
+      card.append(img,meta);
+      completedGrid.appendChild(card);
+    }
   }
 }
 
@@ -1758,10 +1801,10 @@ async function syncArtworkSnapshot(snapshot){
   }
 
   // Moving the artwork to a new easel ends the old easel's exhibition immediately.
-  for(const seat of seatSlots){
-    if(seat.index!==seat.index && seat.serverArtworkOwner===ownerId){
-      seat.artworkLockedUntil=0;
-      seat.serverArtworkOwner=null;
+  for(const otherSeat of seatSlots){
+    if(otherSeat.index!==seat.index && otherSeat.serverArtworkOwner===ownerId){
+      otherSeat.artworkLockedUntil=0;
+      otherSeat.serverArtworkOwner=null;
     }
   }
 
