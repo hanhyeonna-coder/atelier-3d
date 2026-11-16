@@ -1421,7 +1421,6 @@ async function ensureActiveWork(){
   if(found)return found;
 
   const {data:created,error:createError}=await supabase
-  const {data:created,error:createError}=await supabase
     .from('atelier_works')
     .insert({
       owner_id:clientId,
