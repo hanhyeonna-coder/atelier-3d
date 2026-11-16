@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.2 · bridge expansion + crisp trash icon</div>
+  <div id="version">controller v8.3 · optional ext environment + snowfall</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -319,6 +319,11 @@ let boatPrevPos=new THREE.Vector3();
 
 const skyClouds=[];
 const waterCloudReflections=[];
+let snowSystem=null;
+let snowPositions=null;
+let snowVelocities=null;
+const SNOW_COUNT=850;
+let snowEnabled=true;
 let boatHasPrev=false;
 let boatAngle=0;
 const BOAT_RADIUS=10.5;
@@ -3155,19 +3160,22 @@ Promise.all([
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
-  loadGLB('./models/atelier_boat.glb').catch(()=>null)
-]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
+  loadGLB('./models/atelier_boat.glb').catch(()=>null),
+  loadGLB('./models/atelier_environment_ext_web.glb').catch(()=>null)
+]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB,extEnvGLB])=>{
   // Non-avatar GLBs must never contribute character meshes.
   // Catch both rigged duplicates and meshes accidentally exported as ordinary geometry.
   hideEmbeddedRiggedCharacters(envGLB?.scene);
   hideEmbeddedRiggedCharacters(furnitureGLB?.scene);
   hideEmbeddedRiggedCharacters(flowerGLB?.scene);
   hideEmbeddedRiggedCharacters(boatGLB?.scene);
+  hideEmbeddedRiggedCharacters(extEnvGLB?.scene);
 
   hideAvatarLikeMeshes(envGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(furnitureGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(flowerGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(boatGLB?.scene,avGLB?.scene);
+  hideAvatarLikeMeshes(extEnvGLB?.scene,avGLB?.scene);
 
   // Hide stale decor/furniture baked into the environment.
   // Dedicated GLBs below are now the single source of truth.
@@ -3185,6 +3193,11 @@ Promise.all([
   });
   enhanceMaterials(envGLB.scene);
   scene.add(envGLB.scene);
+
+  if(extEnvGLB){
+    enhanceMaterials(extEnvGLB.scene);
+    scene.add(extEnvGLB.scene);
+  }
 
   if(envGLB.animations?.length){
     envMixer=new THREE.AnimationMixer(envGLB.scene);
@@ -3230,6 +3243,7 @@ Promise.all([
 
   createBridgeAndGalleryLot();
   createAtmosphericClouds();
+  createSnowSystem();
 
   if(boatGLB){
     enhanceMaterials(boatGLB.scene);
@@ -3409,6 +3423,68 @@ function createBridgeAndGalleryLot(){
   scene.add(bridgeGroup);
 }
 
+function createSnowSystem(){
+  const geometry=new THREE.BufferGeometry();
+  snowPositions=new Float32Array(SNOW_COUNT*3);
+  snowVelocities=new Float32Array(SNOW_COUNT*2);
+
+  for(let i=0;i<SNOW_COUNT;i++){
+    const j=i*3;
+    snowPositions[j]=(Math.random()-.5)*26;
+    snowPositions[j+1]=Math.random()*13+1.5;
+    snowPositions[j+2]=(Math.random()-.5)*26;
+
+    const k=i*2;
+    snowVelocities[k]=.45+Math.random()*.75;
+    snowVelocities[k+1]=(.05+Math.random()*.22)*(Math.random()<.5?-1:1);
+  }
+
+  geometry.setAttribute('position',new THREE.BufferAttribute(snowPositions,3));
+
+  const material=new THREE.PointsMaterial({
+    color:0xffffff,
+    size:.055,
+    transparent:true,
+    opacity:.72,
+    depthWrite:false,
+    sizeAttenuation:true
+  });
+
+  snowSystem=new THREE.Points(geometry,material);
+  snowSystem.name='Atelier Snow';
+  snowSystem.frustumCulled=false;
+  scene.add(snowSystem);
+}
+
+function updateSnow(dt){
+  if(!snowSystem || !snowEnabled)return;
+
+  const pos=snowSystem.geometry.attributes.position.array;
+  const windX=.10;
+
+  for(let i=0;i<SNOW_COUNT;i++){
+    const j=i*3;
+    const k=i*2;
+
+    pos[j]+= (windX+snowVelocities[k+1]) * dt;
+    pos[j+1]-= snowVelocities[k] * dt;
+    pos[j+2]+= Math.sin((performance.now()*.0005)+(i*.37))*.018*dt;
+
+    if(pos[j+1]<-.15){
+      pos[j]=(Math.random()-.5)*26;
+      pos[j+1]=Math.random()*5+10;
+      pos[j+2]=(Math.random()-.5)*26;
+    }
+
+    if(pos[j]>14)pos[j]=-14;
+    if(pos[j]<-14)pos[j]=14;
+    if(pos[j+2]>14)pos[j+2]=-14;
+    if(pos[j+2]<-14)pos[j+2]=14;
+  }
+
+  snowSystem.geometry.attributes.position.needsUpdate=true;
+}
+
 function makeCloudPuffTexture(){
   const c=document.createElement('canvas');
   c.width=256;
@@ -3534,6 +3610,7 @@ function tick(){
   if(envMixer)envMixer.update(dt);
   updateBoatMotion(dt);
   updateAtmosphericClouds(dt);
+  updateSnow(dt);
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
