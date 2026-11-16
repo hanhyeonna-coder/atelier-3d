@@ -1392,7 +1392,7 @@ function startRealtimeSync(){
     });
 }
 
-async function ensureActiveWork(){
+async function findActiveWork(){
   if(activeWorkId)return activeWorkId;
 
   const {data:existing,error:existingError}=await supabase
@@ -1413,6 +1413,14 @@ async function ensureActiveWork(){
     return activeWorkId;
   }
 
+  return null;
+}
+
+async function ensureActiveWork(){
+  const found=await findActiveWork();
+  if(found)return found;
+
+  const {data:created,error:createError}=await supabase
   const {data:created,error:createError}=await supabase
     .from('atelier_works')
     .insert({
@@ -1454,7 +1462,7 @@ async function uploadArtworkToStorage(dataUrl,workId){
 }
 
 async function completeCurrentWork(){
-  const workId=await ensureActiveWork();
+  const workId=await findActiveWork();
   if(!workId){
     showStatus('진행 중인 작품이 없어요');
     return;
@@ -1503,7 +1511,7 @@ async function loadMyHistory(){
   historyGrid.innerHTML='';
   historyModal.classList.add('show');
 
-  const workId=await ensureActiveWork();
+  const workId=await findActiveWork();
   completeWorkBtn.disabled=!workId;
 
   const [{data:history,error:hErr},{data:daily,error:dErr}]=await Promise.all([
