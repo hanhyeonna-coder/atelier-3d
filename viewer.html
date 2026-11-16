@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v4.5 · dynamic easel ownership + seat work timer</div>
+  <div id="version">controller v4.6 · dynamic easel ownership + seat work timer</div>
 </div>
 
 <script type="importmap">
@@ -93,7 +93,6 @@ let moveTarget=null;
 let pendingPlayerSeat=null;
 let playerSeat=null;
 let mySeat=null;
-let myEaselMarker=null;
 let workElapsedSeconds=0;
 let furnitureScene=null;
 
@@ -756,50 +755,6 @@ function collectSeatSlots(furnitureRoot){
   console.log('Seat slots aligned to easels:',seatSlots.length);
 }
 
-function createMyEaselMarker(seat){
-  if(myEaselMarker){
-    myEaselMarker.parent?.remove(myEaselMarker);
-    myEaselMarker.material?.map?.dispose?.();
-    myEaselMarker.material?.dispose?.();
-    myEaselMarker=null;
-  }
-
-  const canvas=document.createElement('canvas');
-  canvas.width=512;
-  canvas.height=128;
-  const ctx=canvas.getContext('2d');
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='rgba(255,255,255,.92)';
-  ctx.strokeStyle='rgba(107,75,50,.75)';
-  ctx.lineWidth=5;
-  ctx.beginPath();
-  ctx.roundRect(8,8,496,112,28);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle='#5a3e2d';
-  ctx.font='700 46px sans-serif';
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
-  ctx.fillText('MY EASEL',256,64);
-
-  const tex=new THREE.CanvasTexture(canvas);
-  tex.colorSpace=THREE.SRGBColorSpace;
-  const mat=new THREE.SpriteMaterial({
-    map:tex,
-    transparent:true,
-    depthTest:false
-  });
-  const sprite=new THREE.Sprite(mat);
-  sprite.name='My Easel Marker';
-  sprite.scale.set(1.55,.39,1);
-
-  const box=new THREE.Box3().setFromObject(seat.easel);
-  const p=box.getCenter(new THREE.Vector3());
-  sprite.position.set(p.x,box.max.y+.42,p.z);
-  scene.add(sprite);
-  myEaselMarker=sprite;
-}
-
 function makeNPCActionSet(model,clips){
   const mixer=new THREE.AnimationMixer(model);
   const actions={};
@@ -1262,7 +1217,6 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         mySeat=playerSeat;
-        createMyEaselMarker(mySeat);
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar('Avatar_Sit');
