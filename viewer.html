@@ -21,7 +21,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">작업시간 00:00</div>
-  <div id="version">controller v4.7 · canvas image upload on active easel</div>
+  <div id="version">controller v4.8 · contain artwork + paint loop + work prompts</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 
@@ -96,6 +96,12 @@ let pendingPlayerSeat=null;
 let playerSeat=null;
 let mySeat=null;
 let workElapsedSeconds=0;
+let workPromptSprite=null;
+let workPromptTexture=null;
+let workPromptCanvas=null;
+let workPromptCtx=null;
+let workPromptIndex=-1;
+const WORK_PROMPTS=['작업 중...','오늘 작업한 그림을 올려볼까요?'];
 let furnitureScene=null;
 
 // NPC atelier residents.
@@ -828,7 +834,7 @@ function placeNPCSeated(npc,seat){
   npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
   npc.state='seated';
   npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
-  playNPC(npc,'Avatar_Sit',0);
+  playNPC(npc,npc.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit',0);
 }
 
 function spawnNPCs(baseModel,clips,count=NPC_COUNT){
@@ -966,6 +972,44 @@ function tryOpenArtworkOnClickedCanvas(){
   return false;
 }
 
+function makeContainedArtworkTexture(img,mesh){
+  const box=new THREE.Box3().setFromObject(mesh);
+  const size=box.getSize(new THREE.Vector3());
+
+  // Easel canvas is upright: world X/Y are its visible width/height.
+  // Preserve original image ratio and fill unused area with real canvas white.
+  const physicalAspect=Math.max(.2,Math.min(5,size.x/Math.max(size.y,.001)));
+  const texW=1024;
+  const texH=Math.max(256,Math.round(texW/physicalAspect));
+
+  const c=document.createElement('canvas');
+  c.width=texW;
+  c.height=texH;
+  const ctx=c.getContext('2d');
+
+  ctx.fillStyle='#f7f4ed';
+  ctx.fillRect(0,0,texW,texH);
+
+  const imageAspect=img.naturalWidth/img.naturalHeight;
+  let drawW=texW;
+  let drawH=drawW/imageAspect;
+  if(drawH>texH){
+    drawH=texH;
+    drawW=drawH*imageAspect;
+  }
+
+  const x=(texW-drawW)/2;
+  const y=(texH-drawH)/2;
+  ctx.drawImage(img,x,y,drawW,drawH);
+
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.needsUpdate=true;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  return tex;
+}
+
 function applyArtworkImage(img){
   if(!playerSeat)return;
 
@@ -975,17 +1019,14 @@ function applyArtworkImage(img){
     return;
   }
 
-  const tex=new THREE.Texture(img);
-  tex.colorSpace=THREE.SRGBColorSpace;
-  tex.needsUpdate=true;
-
   canvases.forEach(mesh=>{
+    const tex=makeContainedArtworkTexture(img,mesh);
     const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
     const replaced=originals.map(mat=>{
       const m=(mat?.clone?.() || new THREE.MeshStandardMaterial());
       m.map=tex;
       if(m.color)m.color.set(0xffffff);
-      if('roughness' in m)m.roughness=.72;
+      if('roughness' in m)m.roughness=.78;
       if('metalness' in m)m.metalness=0;
       m.transparent=false;
       m.opacity=1;
@@ -996,7 +1037,7 @@ function applyArtworkImage(img){
     mesh.userData.artworkTexture=tex;
   });
 
-  status.textContent='작품이 캔버스에 올라갔어요';
+  status.textContent='작품이 원본 비율 그대로 캔버스에 올라갔어요';
 }
 
 artUpload.addEventListener('change',()=>{
@@ -1110,7 +1151,7 @@ function updateNPCs(dt,now){
           npc.state='seated';
           npc.stateUntil=now+THREE.MathUtils.randFloat(7,15);
           npc.target=null;
-          playNPC(npc,'Avatar_Sit');
+          playNPC(npc,npc.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
         }else{
           npc.state='idle';
           npc.stateUntil=now+THREE.MathUtils.randFloat(1.5,5.0);
@@ -1276,6 +1317,74 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 
+function ensureWorkPrompt(){
+  if(workPromptSprite)return;
+
+  workPromptCanvas=document.createElement('canvas');
+  workPromptCanvas.width=1024;
+  workPromptCanvas.height=180;
+  workPromptCtx=workPromptCanvas.getContext('2d');
+  workPromptTexture=new THREE.CanvasTexture(workPromptCanvas);
+  workPromptTexture.colorSpace=THREE.SRGBColorSpace;
+
+  const mat=new THREE.SpriteMaterial({
+    map:workPromptTexture,
+    transparent:true,
+    depthTest:false,
+    depthWrite:false
+  });
+  workPromptSprite=new THREE.Sprite(mat);
+  workPromptSprite.name='Work Prompt';
+  workPromptSprite.scale.set(3.2,.56,1);
+  workPromptSprite.renderOrder=50;
+  workPromptSprite.visible=false;
+  scene.add(workPromptSprite);
+}
+
+function drawWorkPrompt(text){
+  ensureWorkPrompt();
+  const ctx=workPromptCtx;
+  const w=workPromptCanvas.width;
+  const h=workPromptCanvas.height;
+
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,255,255,.90)';
+  ctx.strokeStyle='rgba(93,70,54,.28)';
+  ctx.lineWidth=5;
+  ctx.beginPath();
+  ctx.roundRect(12,12,w-24,h-24,52);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle='#4c3a30';
+  ctx.font='700 54px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(text,w/2,h/2+1);
+  workPromptTexture.needsUpdate=true;
+}
+
+function updateWorkPrompt(){
+  ensureWorkPrompt();
+
+  if(!playerSeat){
+    workPromptSprite.visible=false;
+    workPromptIndex=-1;
+    return;
+  }
+
+  const idx=Math.floor(performance.now()/3500)%WORK_PROMPTS.length;
+  if(idx!==workPromptIndex){
+    workPromptIndex=idx;
+    drawWorkPrompt(WORK_PROMPTS[idx]);
+  }
+
+  const box=new THREE.Box3().setFromObject(playerSeat.easel);
+  const center=box.getCenter(new THREE.Vector3());
+  workPromptSprite.position.set(center.x,box.max.y+.62,center.z);
+  workPromptSprite.visible=true;
+}
+
 function updateWorkTimer(dt){
   if(playerSeat)workElapsedSeconds+=dt;
 
@@ -1331,7 +1440,7 @@ function updateMovement(dt){
         mySeat=playerSeat;
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
-        playAvatar('Avatar_Sit');
+        playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
         status.textContent='내 이젤에서 작업 중 · 일어나면 타이머 일시정지';
       }else{
         playAvatar('Avatar_Idle');
@@ -1342,7 +1451,8 @@ function updateMovement(dt){
     dir.normalize();
   }else{
     if(playerSeat){
-      if(currentAction!==avatarActions['Avatar_Sit'])playAvatar('Avatar_Sit');
+      const seatedAction=avatarActions['Avatar_Paint']||avatarActions['Avatar_Sit'];
+      if(currentAction!==seatedAction)playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
       return;
     }
     if(currentAction===avatarActions['Avatar_Walk'])playAvatar('Avatar_Idle');
@@ -1548,6 +1658,7 @@ function tick(){
   });
 
   updateWorkTimer(dt);
+  updateWorkPrompt();
   updateMovement(dt);
   updateCamera();
 
