@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
-  <div id="version">controller v4.0 · latest flowers + corrected seated facing</div>
+  <div id="version">controller v4.1 · latest flowers + lower flower -90°</div>
 </div>
 
 <script type="importmap">
@@ -584,12 +584,32 @@ function keepOnlyFurniture(root){
 }
 
 function keepOnlyFlowers(root){
-  // Latest flower GLB already contains applied Blender orientation.
-  // Show it exactly as exported; do not add another -90° rotation.
+  // Show the dedicated flower GLB and restore the intended Lower Flower tilt.
+  // Blender's -90° lower-flower orientation is not surviving the glTF/web axis conversion reliably.
   root.traverse(o=>{
     o.visible=true;
     if(o.isMesh)o.frustumCulled=false;
   });
+
+  // Rotate only top-level Lower Flower roots so children are not rotated twice.
+  const lowerRoots=[];
+  root.traverse(o=>{
+    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    if(!n.includes('lower flower'))return;
+
+    let p=o.parent;
+    while(p && p!==root){
+      if((p.name||'').toLowerCase().includes('lower flower'))return;
+      p=p.parent;
+    }
+    lowerRoots.push(o);
+  });
+
+  lowerRoots.forEach(o=>{
+    o.rotation.x=-Math.PI/2;
+  });
+
   root.updateMatrixWorld(true);
 }
 
