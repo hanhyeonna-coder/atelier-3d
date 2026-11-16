@@ -38,10 +38,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.2 · artwork history + daily record</div>
+  <div id="version">controller v7.3 · single-work progress history</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
-<button id="historyBtn">내 기록</button>
+<button id="historyBtn">진행 기록</button>
 <div id="statusToast"></div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -1406,8 +1406,8 @@ async function loadMyHistory(){
     supabase.from('atelier_artwork_history')
       .select('*')
       .eq('owner_id',clientId)
-      .order('created_at',{ascending:false})
-      .limit(100),
+      .order('created_at',{ascending:true})
+      .limit(12),
     supabase.from('atelier_daily_work')
       .select('*')
       .eq('owner_id',clientId)
@@ -1422,10 +1422,10 @@ async function loadMyHistory(){
   }
 
   const todaySeconds=Math.max(workElapsedSeconds,Number(daily?.work_seconds)||0);
-  historySummary.textContent=`오늘 ${formatTodayWork(todaySeconds)} · 작품 ${history?.length||0}개`;
+  historySummary.textContent=`현재 작품 진행 과정 · ${history?.length||0}단계 · 오늘 ${formatTodayWork(todaySeconds)}`;
 
   if(!history?.length){
-    historyGrid.innerHTML='<div style="color:#7a6b62;font-size:13px">아직 저장된 작품이 없어요.</div>';
+    historyGrid.innerHTML='<div style="color:#7a6b62;font-size:13px">아직 이 작품의 진행 기록이 없어요.</div>';
     return;
   }
 
@@ -1440,7 +1440,8 @@ async function loadMyHistory(){
     const meta=document.createElement('div');
     meta.className='historyMeta';
     const when=new Date(item.created_at);
-    meta.textContent=`${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
+    const step=(history.indexOf(item)+1);
+    meta.textContent=`${step}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
 
     card.append(img,meta);
     historyGrid.appendChild(card);
@@ -1508,6 +1509,16 @@ async function syncArtworkToServer(){
     display_name:displayName
   });
   if(historyError)console.warn('artwork history save',historyError);
+
+  const {data:historyRows}=await supabase.from('atelier_artwork_history')
+    .select('id,created_at')
+    .eq('owner_id',clientId)
+    .order('created_at',{ascending:false});
+
+  if(historyRows?.length>12){
+    const staleIds=historyRows.slice(12).map(r=>r.id);
+    await supabase.from('atelier_artwork_history').delete().in('id',staleIds);
+  }
 
   await syncDailyWorkToServer();
 }
