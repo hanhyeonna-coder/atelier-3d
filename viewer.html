@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v6.6 · proximity names + faster live motion</div>
+  <div id="version">controller v6.7 · reliable cross-device motion</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -149,6 +149,7 @@ const remoteAvatars=new Map();
 let realtimeChannel=null;
 let heartbeatTimer=null;
 let presencePulseTimer=null;
+let presencePollTimer=null;
 let lastMotionSentAt=0;
 const remoteMotion=new Map();
 
@@ -1039,8 +1040,7 @@ function syncRemoteAvatars(){
   }
 
   for(const [id,entry] of remoteAvatars){
-    const motion=remoteMotion.get(id);
-    if(!wanted.has(id) && (!motion || performance.now()-(motion.receivedAt||0)>1800))disposeRemoteAvatar(entry);
+    if(!wanted.has(id) && performance.now()-(entry.lastMotionAt||0)>2500)disposeRemoteAvatar(entry);
   }
 
   for(const [id,seat] of wanted){
@@ -1216,12 +1216,24 @@ function applyPresenceRows(rows){
 
     entry.targetPosition.set(row.x,0,row.z);
     if(Number.isFinite(row.yaw))entry.targetYaw=row.yaw;
+
+    // First sighting must start at the actual remote coordinate, never at pavilion center.
+    if(!entry.lastMotionAt){
+      entry.root.position.copy(entry.targetPosition);
+      entry.root.rotation.y=entry.targetYaw;
+    }
     entry.lastMotionAt=performance.now();
 
     if(row.state==='working')playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
     else if(row.state==='walking')playRemote(entry,'Avatar_Walk');
     else playRemote(entry,'Avatar_Idle');
   }
+}
+
+async function fetchPresenceOnly(){
+  const {data,error}=await supabase.from('atelier_presence').select('*');
+  if(error){console.warn('presence poll',error);return;}
+  applyPresenceRows(data||[]);
 }
 
 function handlePresenceChange(payload){
@@ -1300,16 +1312,13 @@ function updateProximityNameLabels(){
 
 function updateRemoteMotion(dt){
   const now=performance.now();
-  for(const [id,entry] of remoteAvatars){
-    const motion=remoteMotion.get(id);
-    if(!motion)continue;
-
-    entry.root.position.lerp(entry.targetPosition,Math.min(1,dt*12));
+  for(const [id,entry] of [...remoteAvatars]){
+    entry.root.position.lerp(entry.targetPosition,Math.min(1,dt*10));
     let delta=entry.targetYaw-entry.root.rotation.y;
     delta=Math.atan2(Math.sin(delta),Math.cos(delta));
-    entry.root.rotation.y+=delta*Math.min(1,dt*12);
+    entry.root.rotation.y+=delta*Math.min(1,dt*10);
 
-    if(now-entry.lastMotionAt>1800 && !seatSlots.some(seat=>seat.serverOccupant===id)){
+    if(now-entry.lastMotionAt>2500 && !seatSlots.some(seat=>seat.serverOccupant===id)){
       disposeRemoteAvatar(entry);
       remoteMotion.delete(id);
     }
@@ -2499,7 +2508,9 @@ Promise.all([
   startRealtimeSync();
   heartbeatTimer=setInterval(serverHeartbeat,5000);
   presencePulseTimer=setInterval(serverPresencePulse,250);
+  presencePollTimer=setInterval(fetchPresenceOnly,500);
   serverPresencePulse();
+  fetchPresenceOnly();
 
   cameraFocus.set(
     avatarRoot.position.x,
