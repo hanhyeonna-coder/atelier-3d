@@ -28,7 +28,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.0 · nearby-name hysteresis</div>
+  <div id="version">controller v7.1 · restore remote motion + visible own name</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 00시간 00분 그림 그렸어요</span></div>
 <div id="statusToast"></div>
@@ -1319,9 +1319,9 @@ function updateProximityNameLabels(){
     }
   }
 
-  // Never show my own name to myself.
+  // My own label stays visible; remote labels are proximity-based.
   const ownLabel=avatarRoot.getObjectByName('Player Name Label');
-  if(ownLabel)ownLabel.visible=false;
+  if(ownLabel)ownLabel.visible=true;
 }
 
 function cleanupOrphanRemoteRoots(){
@@ -2577,7 +2577,7 @@ Promise.all([
   normalizeAvatarOrigin(avatarModel);
   setAvatarNameLabel(avatarRoot,displayName);
   const ownNameLabel=avatarRoot.getObjectByName('Player Name Label');
-  if(ownNameLabel)ownNameLabel.visible=false;
+  if(ownNameLabel)ownNameLabel.visible=true;
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
   window.__atelierAvatarClips=avGLB.animations;
@@ -2642,6 +2642,10 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
 
   if(avatarMixer)avatarMixer.update(dt);
+  remoteAvatars.forEach(entry=>entry.mixer?.update(dt));
+  updateRemoteMotion(dt);
+  updateProximityNameLabels();
+
   updateNPCs(dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
   updateBoatMotion(dt);
