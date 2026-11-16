@@ -27,7 +27,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v5.4 · clickable upload prompt + artwork preview</div>
+  <div id="version">controller v5.5 · NPC dummy artwork preview</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -1106,6 +1106,7 @@ function getCanvasMeshesForSeat(seat){
 
 function getSeatArtworkDataUrl(seat){
   if(!seat)return null;
+  if(seat.userData?.artworkDataUrl)return seat.userData.artworkDataUrl;
   if(savedArtworkSeatIndex===seat.index && savedArtworkDataUrl)return savedArtworkDataUrl;
 
   const canvases=getCanvasMeshesForSeat(seat);
@@ -1119,13 +1120,86 @@ function getSeatArtworkDataUrl(seat){
   return null;
 }
 
+function makeDummyArtworkDataUrl(){
+  const c=document.createElement('canvas');
+  c.width=900;
+  c.height=700;
+  const ctx=c.getContext('2d');
+
+  const sky=ctx.createLinearGradient(0,0,0,700);
+  sky.addColorStop(0,'#b9dcf4');
+  sky.addColorStop(.58,'#f5d6a9');
+  sky.addColorStop(1,'#8fb59f');
+  ctx.fillStyle=sky;
+  ctx.fillRect(0,0,900,700);
+
+  ctx.fillStyle='#6f8f73';
+  ctx.beginPath();
+  ctx.moveTo(0,420);
+  ctx.quadraticCurveTo(180,270,330,410);
+  ctx.quadraticCurveTo(500,240,700,410);
+  ctx.quadraticCurveTo(810,320,900,390);
+  ctx.lineTo(900,700);
+  ctx.lineTo(0,700);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle='#6aa6b8';
+  ctx.fillRect(0,500,900,200);
+
+  ctx.fillStyle='#f4ead4';
+  ctx.fillRect(540,340,150,120);
+  ctx.fillStyle='#c87862';
+  ctx.beginPath();
+  ctx.moveTo(520,345);
+  ctx.lineTo(615,285);
+  ctx.lineTo(710,345);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle='#d98da0';
+  for(let i=0;i<28;i++){
+    const x=80+(i%7)*34;
+    const y=355+Math.floor(i/7)*34;
+    ctx.beginPath();
+    ctx.arc(x,y,12,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle='rgba(255,255,255,.55)';
+  ctx.lineWidth=10;
+  ctx.beginPath();
+  ctx.moveTo(80,585);
+  ctx.quadraticCurveTo(360,545,820,610);
+  ctx.stroke();
+
+  return c.toDataURL('image/png');
+}
+
+function addDummyArtworkToNpcSeat(){
+  const npc=npcs.find(n=>n.seat);
+  if(!npc?.seat)return;
+
+  const seat=npc.seat;
+  const dataUrl=makeDummyArtworkDataUrl();
+  const img=new Image();
+  img.onload=()=>{
+    const canvases=getCanvasMeshesForSeat(seat);
+    canvases.forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
+    seat.userData=seat.userData||{};
+    seat.userData.artworkDataUrl=dataUrl;
+    seat.userData.artworkMeta='LumiSketch · 작업 42분';
+  };
+  img.src=dataUrl;
+}
+
 function openArtworkPreview(seat){
   const src=getSeatArtworkDataUrl(seat);
   if(!src)return false;
   artPreview.src=src;
   artMeta.textContent=seat===playerArtworkSeat
     ? `내 작품 · 작업시간 ${formatDuration(workElapsedSeconds)}`
-    : '아틀리에 작품';
+    : (seat.userData?.artworkMeta || '아틀리에 작품');
   artModal.classList.add('show');
   return true;
 }
@@ -1990,6 +2064,7 @@ Promise.all([
   }
   spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
   restoreSavedArtwork();
+  addDummyArtworkToNpcSeat();
 
   cameraFocus.set(
     avatarRoot.position.x,
