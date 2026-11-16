@@ -27,7 +27,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
   <div id="status">불러오는 중</div>
   <div id="workTimer">오늘 00:00 · 누적 00:00</div>
-  <div id="version">controller v5.5 · NPC dummy artwork preview</div>
+  <div id="version">controller v6.0 · Supabase realtime multiplayer MVP</div>
 </div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -42,7 +42,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 {
   "imports":{
     "three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.119.0"
   }
 }
 </script>
@@ -52,6 +53,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import {createClient} from '@supabase/supabase-js';
 
 const loading=document.getElementById('loading');
 const status=document.getElementById('status');
@@ -102,6 +104,20 @@ scene.add(fill);
 
 const loader=new GLTFLoader();
 const clock=new THREE.Clock();
+
+const SUPABASE_URL='https://uuotlmljzvludygzrvvt.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_QXfhaLNfkXUs13Pe8u7wYQ_V9F2low4';
+const supabase=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const CLIENT_ID_KEY='atelier3d_client_id';
+let clientId=localStorage.getItem(CLIENT_ID_KEY);
+if(!clientId){
+  clientId=crypto.randomUUID();
+  localStorage.setItem(CLIENT_ID_KEY,clientId);
+}
+const displayName='Painter-'+clientId.slice(0,4);
+const remoteAvatars=new Map();
+let realtimeChannel=null;
+let heartbeatTimer=null;
 
 let avatarRoot=null;
 let avatarModel=null;
@@ -775,6 +791,8 @@ function collectSeatSlots(furnitureRoot){
       faceDir,
       occupiedBy:null,
       artworkLockedUntil:0,
+      serverOccupant:null,
+      serverArtworkOwner:null,
       clickRadius:0.95
     };
 
@@ -934,6 +952,161 @@ function playerCandidateBlocked(candidate,minDistance=.64){
   return npcs.some(n=>n.root.position.distanceTo(candidate)<minDistance);
 }
 
+async function fetchServerState(){
+  const [{data:easels,error:e1},{data:artworks,error:e2}]=await Promise.all([
+    supabase.from('atelier_easels').select('*').order('seat_index'),
+    supabase.from('atelier_artworks').select('*').order('seat_index')
+  ]);
+  if(e1)console.warn('easel sync',e1);
+  if(e2)console.warn('artwork sync',e2);
+  if(easels)applyServerEasels(easels);
+  if(artworks)applyServerArtworks(artworks);
+}
+
+function applyServerEasels(rows){
+  const byIndex=new Map(rows.map(r=>[r.seat_index,r]));
+  for(const seat of seatSlots){
+    const row=byIndex.get(seat.index);
+    seat.serverOccupant=row?.occupant_id||null;
+  }
+  syncRemoteAvatars();
+}
+
+function disposeRemoteAvatar(entry){
+  if(!entry)return;
+  scene.remove(entry.root);
+  remoteAvatars.delete(entry.clientId);
+}
+
+function syncRemoteAvatars(){
+  if(!avatarModel)return;
+  const wanted=new Map();
+  for(const seat of seatSlots){
+    const id=seat.serverOccupant;
+    if(id && id!==clientId)wanted.set(id,seat);
+  }
+
+  for(const [id,entry] of remoteAvatars){
+    if(!wanted.has(id))disposeRemoteAvatar(entry);
+  }
+
+  for(const [id,seat] of wanted){
+    let entry=remoteAvatars.get(id);
+    if(!entry){
+      const root=new THREE.Group();
+      const model=SkeletonUtils.clone(avatarModel);
+      root.add(model);
+      const {mixer,actions}=makeNPCActionSet(model,Object.keys(avatarActions).length?[]:[]);
+      // create actions directly from uploaded animation clips kept below
+      const mixer2=new THREE.AnimationMixer(model);
+      const actions2={};
+      window.__atelierAvatarClips?.forEach(clip=>actions2[clip.name]=mixer2.clipAction(clip));
+      const action=actions2['Avatar_Paint']||actions2['Avatar_Sit'];
+      action?.reset().play();
+      root.position.copy(seat.position);
+      root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
+      scene.add(root);
+      entry={clientId:id,root,model,mixer:mixer2,actions:actions2};
+      remoteAvatars.set(id,entry);
+    }else{
+      entry.root.position.copy(seat.position);
+      entry.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
+    }
+  }
+}
+
+function clearServerArtworkVisuals(){
+  for(const seat of seatSlots){
+    if(seat.serverArtworkOwner && seat.serverArtworkOwner!==clientId){
+      const canvases=getCanvasMeshesForSeat(seat);
+      canvases.forEach(mesh=>{
+        const old=mesh.getObjectByName('Artwork Overlay');
+        if(old){
+          old.geometry?.dispose?.();
+          old.material?.map?.dispose?.();
+          old.material?.dispose?.();
+          mesh.remove(old);
+        }
+      });
+      seat.serverArtworkOwner=null;
+      seat.userData=seat.userData||{};
+      delete seat.userData.artworkDataUrl;
+      delete seat.userData.artworkMeta;
+    }
+  }
+}
+
+function applyServerArtworks(rows){
+  clearServerArtworkVisuals();
+  for(const row of rows){
+    const seat=seatSlots.find(s=>s.index===row.seat_index);
+    if(!seat || row.owner_id===clientId)continue;
+    seat.serverArtworkOwner=row.owner_id;
+    seat.artworkLockedUntil=row.locked_until?new Date(row.locked_until).getTime():0;
+    seat.userData=seat.userData||{};
+    seat.userData.artworkDataUrl=row.image_url;
+    seat.userData.artworkMeta=(row.display_name||'Painter')+' · 작업 '+Math.max(1,Math.round((row.work_seconds||0)/60))+'분';
+    const img=new Image();
+    img.onload=()=>getCanvasMeshesForSeat(seat).forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
+    img.src=row.image_url;
+  }
+}
+
+function startRealtimeSync(){
+  if(realtimeChannel)return;
+  realtimeChannel=supabase.channel('atelier-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'atelier_easels'},fetchServerState)
+    .on('postgres_changes',{event:'*',schema:'public',table:'atelier_artworks'},fetchServerState)
+    .subscribe();
+}
+
+async function serverClaimSeat(seat){
+  const {data,error}=await supabase.rpc('atelier_claim_easel',{p_seat_index:seat.index,p_client_id:clientId});
+  if(error){console.warn(error);return false;}
+  await fetchServerState();
+  return data===true;
+}
+
+async function serverReleaseSeat(seat){
+  if(!seat)return;
+  await supabase.rpc('atelier_release_easel',{p_seat_index:seat.index,p_client_id:clientId});
+  await supabase.from('atelier_presence').upsert({
+    client_id:clientId,seat_index:null,state:'idle',work_seconds:Math.floor(workElapsedSeconds),
+    display_name:displayName,last_seen:new Date().toISOString()
+  });
+}
+
+async function serverHeartbeat(){
+  if(playerSeat){
+    await supabase.rpc('atelier_heartbeat',{p_seat_index:playerSeat.index,p_client_id:clientId});
+    await supabase.from('atelier_presence').upsert({
+      client_id:clientId,seat_index:playerSeat.index,state:'working',
+      work_seconds:Math.floor(workElapsedSeconds),display_name:displayName,last_seen:new Date().toISOString()
+    });
+  }
+}
+
+async function syncArtworkToServer(){
+  if(!playerSeat || !savedArtworkDataUrl)return;
+  await supabase.from('atelier_artworks').delete().eq('owner_id',clientId);
+  await supabase.from('atelier_artworks').upsert({
+    owner_id:clientId,
+    seat_index:playerSeat.index,
+    image_url:savedArtworkDataUrl,
+    work_seconds:Math.floor(workElapsedSeconds),
+    display_name:displayName,
+    locked_until:null,
+    updated_at:new Date().toISOString()
+  },{onConflict:'seat_index'});
+}
+
+async function lockServerArtwork(seat,untilMs){
+  if(!seat || savedArtworkSeatIndex!==seat.index)return;
+  await supabase.from('atelier_artworks')
+    .update({locked_until:new Date(untilMs).toISOString(),updated_at:new Date().toISOString()})
+    .eq('owner_id',clientId);
+}
+
 function localDateKey(){
   const d=new Date();
   const y=d.getFullYear();
@@ -1039,6 +1212,7 @@ function restoreSavedArtwork(){
     savedArtworkDataUrl=null;
     savedArtworkSeatIndex=null;
     savedArtworkLockedUntil=0;
+    supabase.from('atelier_artworks').update({locked_until:null,updated_at:new Date().toISOString()}).eq('owner_id',clientId);
     saveProgress();
     return;
   }
@@ -1067,6 +1241,7 @@ function restoreSavedArtwork(){
 }
 
 function releasePlayerSeat(){
+  const releasedSeat=playerSeat;
   if(playerSeat){
     if(playerSeat.occupiedBy==='player')playerSeat.occupiedBy=null;
 
@@ -1076,9 +1251,11 @@ function releasePlayerSeat(){
       savedArtworkLockedUntil=until;
       savedArtworkSeatIndex=playerSeat.index;
       saveProgress();
+      lockServerArtwork(playerSeat,until);
     }
   }
 
+  if(releasedSeat)serverReleaseSeat(releasedSeat);
   if(pendingPlayerSeat?.occupiedBy==='player')pendingPlayerSeat.occupiedBy=null;
   playerSeat=null;
   pendingPlayerSeat=null;
@@ -1400,6 +1577,7 @@ function applyArtworkImage(img){
   savedArtworkLockedUntil=0;
   playerSeat.artworkLockedUntil=0;
   saveProgress();
+  syncArtworkToServer();
   status.textContent='작품이 저장됐어요';
 }
 
@@ -1420,8 +1598,13 @@ artUpload.addEventListener('change',()=>{
   img.src=url;
 });
 
-function requestPlayerSeat(seat){
+async function requestPlayerSeat(seat){
   if(!seat)return false;
+
+  if(seat.serverOccupant && seat.serverOccupant!==clientId){
+    status.textContent='지금 다른 사람이 앉아 있어요';
+    return true;
+  }
 
   if(isArtworkLocked(seat) && savedArtworkSeatIndex!==seat.index){
     status.textContent=`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`;
@@ -1450,7 +1633,15 @@ function requestPlayerSeat(seat){
     }
   }
 
-  releasePlayerSeat();
+  const previousSeat=playerSeat;
+  if(previousSeat && previousSeat!==seat)releasePlayerSeat();
+
+  const claimed=await serverClaimSeat(seat);
+  if(!claimed){
+    status.textContent='방금 다른 사람이 먼저 앉았어요';
+    return true;
+  }
+
   seat.occupiedBy='player';
   pendingPlayerSeat=seat;
   moveTarget=seat.position.clone();
@@ -1950,7 +2141,7 @@ Promise.all([
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null)
-]).then(([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
+]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB])=>{
   // Hide stale decor/furniture baked into the environment.
   // Dedicated GLBs below are now the single source of truth.
   envGLB.scene.traverse(o=>{
@@ -2049,6 +2240,7 @@ Promise.all([
   normalizeAvatarOrigin(avatarModel);
 
   avatarMixer=new THREE.AnimationMixer(avatarModel);
+  window.__atelierAvatarClips=avGLB.animations;
   avGLB.animations.forEach(clip=>{
     avatarActions[clip.name]=avatarMixer.clipAction(clip);
   });
@@ -2065,6 +2257,9 @@ Promise.all([
   spawnNPCs(avatarModel,avGLB.animations,NPC_COUNT);
   restoreSavedArtwork();
   addDummyArtworkToNpcSeat();
+  await fetchServerState();
+  startRealtimeSync();
+  heartbeatTimer=setInterval(serverHeartbeat,5000);
 
   cameraFocus.set(
     avatarRoot.position.x,
@@ -2133,7 +2328,15 @@ function tick(){
 }
 tick();
 
-addEventListener('beforeunload',saveProgress);
+addEventListener('beforeunload',()=>{
+  saveProgress();
+  if(playerSeat){
+    navigator.sendBeacon?.(
+      SUPABASE_URL+'/rest/v1/rpc/atelier_release_easel',
+      new Blob([JSON.stringify({p_seat_index:playerSeat.index,p_client_id:clientId})],{type:'application/json'})
+    );
+  }
+});
 
 addEventListener('resize',()=>{
   camera.aspect=innerWidth/innerHeight;
