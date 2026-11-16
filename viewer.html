@@ -21,6 +21,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 .historyItem{background:#f7f3ef;border-radius:14px;padding:9px}
 .historyItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:white;border-radius:9px;display:block}
 .historyMeta{font-size:11px;color:#6b5a50;margin-top:7px;line-height:1.35}
+#completeWorkBtn{margin:0 0 16px;border:0;border-radius:13px;padding:10px 14px;background:#5d493d;color:white;font-weight:800;cursor:pointer}
+#completeWorkBtn:disabled{opacity:.4;cursor:default}
 #statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
 #statusToast.show{opacity:1}
 #version{opacity:.38;font-size:10px;margin-top:4px}
@@ -38,7 +40,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.3 · single-work progress history</div>
+  <div id="version">controller v7.4 · Storage + complete-work flow</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -55,6 +57,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   <div id="historyCard">
     <button id="historyClose" aria-label="닫기">×</button>
     <div id="historySummary">내 작업 기록</div>
+    <button id="completeWorkBtn">작품을 완성했어요</button>
     <div id="historyGrid"></div>
   </div>
 </div>
@@ -89,6 +92,7 @@ const historyModal=document.getElementById('historyModal');
 const historyClose=document.getElementById('historyClose');
 const historySummary=document.getElementById('historySummary');
 const historyGrid=document.getElementById('historyGrid');
+const completeWorkBtn=document.getElementById('completeWorkBtn');
 let statusHideTimer=null;
 function showStatus(message,ms=2200){
   status.textContent=message;
@@ -194,6 +198,8 @@ const STORAGE_KEY='atelier3d_progress_v1';
 let savedArtworkDataUrl=null;
 let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
+let activeWorkId=null;
+let activeWorkCoverUrl=null;
 const ARTWORK_HOLD_MS=5*60*1000;
 let workPromptSprite=null;
 let workPromptTexture=null;
@@ -1386,6 +1392,101 @@ function startRealtimeSync(){
     });
 }
 
+async function ensureActiveWork(){
+  if(activeWorkId)return activeWorkId;
+
+  const {data:existing,error:existingError}=await supabase
+    .from('atelier_works')
+    .select('*')
+    .eq('owner_id',clientId)
+    .eq('status','active')
+    .maybeSingle();
+
+  if(existingError){
+    console.warn('active work lookup',existingError);
+    return null;
+  }
+
+  if(existing){
+    activeWorkId=existing.id;
+    activeWorkCoverUrl=existing.cover_image_url||null;
+    return activeWorkId;
+  }
+
+  const {data:created,error:createError}=await supabase
+    .from('atelier_works')
+    .insert({
+      owner_id:clientId,
+      display_name:displayName,
+      status:'active',
+      total_work_seconds:Math.floor(workElapsedSeconds)
+    })
+    .select()
+    .single();
+
+  if(createError){
+    console.warn('active work create',createError);
+    return null;
+  }
+
+  activeWorkId=created.id;
+  activeWorkCoverUrl=null;
+  return activeWorkId;
+}
+
+async function uploadArtworkToStorage(dataUrl,workId){
+  const blob=await fetch(dataUrl).then(r=>r.blob());
+  const ext=blob.type==='image/png'?'png':(blob.type==='image/webp'?'webp':'jpg');
+  const path=`${clientId}/${workId}/${Date.now()}.${ext}`;
+
+  const {error}=await supabase.storage
+    .from('atelier-artworks')
+    .upload(path,blob,{
+      contentType:blob.type||'image/jpeg',
+      cacheControl:'3600',
+      upsert:false
+    });
+
+  if(error)throw error;
+
+  const {data}=supabase.storage.from('atelier-artworks').getPublicUrl(path);
+  return {path,url:data.publicUrl};
+}
+
+async function completeCurrentWork(){
+  const workId=await ensureActiveWork();
+  if(!workId){
+    showStatus('진행 중인 작품이 없어요');
+    return;
+  }
+
+  completeWorkBtn.disabled=true;
+
+  const {error}=await supabase.from('atelier_works')
+    .update({
+      status:'completed',
+      completed_at:new Date().toISOString(),
+      total_work_seconds:Math.floor(workElapsedSeconds),
+      cover_image_url:activeWorkCoverUrl
+    })
+    .eq('id',workId)
+    .eq('owner_id',clientId);
+
+  if(error){
+    console.warn('complete work',error);
+    showStatus('작품 완료 저장에 실패했어요');
+    completeWorkBtn.disabled=false;
+    return;
+  }
+
+  activeWorkId=null;
+  activeWorkCoverUrl=null;
+  historyModal.classList.remove('show');
+  showStatus('작품을 완성했어요 · 다음 업로드부터 새 작품으로 시작해요',3200);
+}
+
+completeWorkBtn.addEventListener('click',completeCurrentWork);
+
 async function syncDailyWorkToServer(){
   const {error}=await supabase.from('atelier_daily_work').upsert({
     owner_id:clientId,
@@ -1402,12 +1503,17 @@ async function loadMyHistory(){
   historyGrid.innerHTML='';
   historyModal.classList.add('show');
 
+  const workId=await ensureActiveWork();
+  completeWorkBtn.disabled=!workId;
+
   const [{data:history,error:hErr},{data:daily,error:dErr}]=await Promise.all([
-    supabase.from('atelier_artwork_history')
-      .select('*')
-      .eq('owner_id',clientId)
-      .order('created_at',{ascending:true})
-      .limit(12),
+    workId
+      ? supabase.from('atelier_artwork_history')
+          .select('*')
+          .eq('work_id',workId)
+          .order('created_at',{ascending:true})
+          .limit(12)
+      : Promise.resolve({data:[],error:null}),
     supabase.from('atelier_daily_work')
       .select('*')
       .eq('owner_id',clientId)
@@ -1429,7 +1535,7 @@ async function loadMyHistory(){
     return;
   }
 
-  for(const item of history){
+  for(const [index,item] of history.entries()){
     const card=document.createElement('div');
     card.className='historyItem';
 
@@ -1440,8 +1546,7 @@ async function loadMyHistory(){
     const meta=document.createElement('div');
     meta.className='historyMeta';
     const when=new Date(item.created_at);
-    const step=(history.indexOf(item)+1);
-    meta.textContent=`${step}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
+    meta.textContent=`${index+1}차 · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
 
     card.append(img,meta);
     historyGrid.appendChild(card);
@@ -1483,6 +1588,12 @@ async function serverHeartbeat(){
 async function syncArtworkToServer(){
   if(!playerSeat || !savedArtworkDataUrl)return;
 
+  const workId=await ensureActiveWork();
+  if(!workId){
+    showStatus('작품 기록을 만들지 못했어요');
+    return;
+  }
+
   // Moving the artwork to a new easel ends the old easel's exhibition immediately.
   for(const seat of seatSlots){
     if(seat.index!==playerSeat.index && seat.serverArtworkOwner===clientId){
@@ -1491,11 +1602,24 @@ async function syncArtworkToServer(){
     }
   }
 
+  let stored;
+  try{
+    stored=await uploadArtworkToStorage(savedArtworkDataUrl,workId);
+  }catch(err){
+    console.warn('storage upload',err);
+    showStatus('이미지 저장에 실패했어요');
+    return;
+  }
+
+  activeWorkCoverUrl=stored.url;
+
   await supabase.from('atelier_artworks').delete().eq('owner_id',clientId);
   await supabase.from('atelier_artworks').upsert({
     owner_id:clientId,
     seat_index:playerSeat.index,
-    image_url:savedArtworkDataUrl,
+    image_url:stored.url,
+    storage_path:stored.path,
+    work_id:workId,
     work_seconds:Math.floor(workElapsedSeconds),
     display_name:displayName,
     locked_until:null,
@@ -1504,25 +1628,40 @@ async function syncArtworkToServer(){
 
   const {error:historyError}=await supabase.from('atelier_artwork_history').insert({
     owner_id:clientId,
-    image_url:savedArtworkDataUrl,
+    work_id:workId,
+    image_url:stored.url,
+    storage_path:stored.path,
     work_seconds:Math.floor(workElapsedSeconds),
     display_name:displayName
   });
   if(historyError)console.warn('artwork history save',historyError);
 
+  await supabase.from('atelier_works')
+    .update({
+      total_work_seconds:Math.floor(workElapsedSeconds),
+      cover_image_url:stored.url
+    })
+    .eq('id',workId)
+    .eq('owner_id',clientId);
+
   const {data:historyRows}=await supabase.from('atelier_artwork_history')
-    .select('id,created_at')
-    .eq('owner_id',clientId)
+    .select('id,storage_path,created_at')
+    .eq('work_id',workId)
     .order('created_at',{ascending:false});
 
   if(historyRows?.length>12){
-    const staleIds=historyRows.slice(12).map(r=>r.id);
+    const stale=historyRows.slice(12);
+    const staleIds=stale.map(r=>r.id);
+    const stalePaths=stale.map(r=>r.storage_path).filter(Boolean);
+
     await supabase.from('atelier_artwork_history').delete().in('id',staleIds);
+    if(stalePaths.length){
+      await supabase.storage.from('atelier-artworks').remove(stalePaths);
+    }
   }
 
   await syncDailyWorkToServer();
 }
-
 async function lockServerArtwork(seat,untilMs){
   if(!seat || savedArtworkSeatIndex!==seat.index)return;
   await supabase.from('atelier_artworks')
