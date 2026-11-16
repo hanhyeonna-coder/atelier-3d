@@ -73,7 +73,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v8.3 · optional ext environment + snowfall</div>
+  <div id="version">controller v8.4 · split environments + authored boat motion</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -315,6 +315,7 @@ function standingPlayerHatColor(){
 let envMixer=null;
 let boatMixer=null;
 let boatMover=null;
+let extEnvMixer=null;
 let boatPrevPos=new THREE.Vector3();
 
 const skyClouds=[];
@@ -3197,6 +3198,15 @@ Promise.all([
   if(extEnvGLB){
     enhanceMaterials(extEnvGLB.scene);
     scene.add(extEnvGLB.scene);
+
+    if(extEnvGLB.animations?.length){
+      extEnvMixer=new THREE.AnimationMixer(extEnvGLB.scene);
+      extEnvGLB.animations.forEach(clip=>{
+        const action=extEnvMixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat,Infinity);
+        action.play();
+      });
+    }
   }
 
   if(envGLB.animations?.length){
@@ -3249,28 +3259,21 @@ Promise.all([
     enhanceMaterials(boatGLB.scene);
     scene.add(boatGLB.scene);
 
+    // Use the Blender-authored boat scale, transform and motion exactly as exported.
+    // Do not apply any web-side scale multiplier or circular route override.
     boatMover=boatGLB.scene.getObjectByName('EXT Boat 0') || boatGLB.scene;
+    boatMover?.traverse(o=>{o.visible=true;});
 
-    if(boatMover){
-      // Exact GLB structure: EXT Boat 0 has Bow/Cabin/Hull mesh children.
-      // Scale geometry 10x, keep child offsets unchanged, and force visibility.
-      boatMover.traverse(o=>{o.visible=true;});
-      boatMover.children.forEach(child=>{
-        if(child.isMesh)child.scale.multiplyScalar(10);
+    if(boatGLB.animations?.length){
+      boatMixer=new THREE.AnimationMixer(boatGLB.scene);
+      boatGLB.animations.forEach(clip=>{
+        const action=boatMixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat,Infinity);
+        action.play();
       });
-
-      boatAngle=0.4;
-      boatMover.position.set(
-        Math.sin(boatAngle)*BOAT_RADIUS,
-        BOAT_Y,
-        Math.cos(boatAngle)*BOAT_RADIUS
-      );
-      boatMover.rotation.y=boatAngle+Math.PI/2;
-      boatMover.getWorldPosition(boatPrevPos);
-      boatHasPrev=true;
+    }else{
+      boatMixer=null;
     }
-
-    boatMixer=null;
   }
 
   // Outer transform group controls movement/facing.
@@ -3581,19 +3584,7 @@ function updateAtmosphericClouds(dt){
 
 
 function updateBoatMotion(dt){
-  if(!boatMover)return;
-
-  boatAngle=(boatAngle+BOAT_ANGULAR_SPEED*dt)%(Math.PI*2);
-
-  const x=Math.sin(boatAngle)*BOAT_RADIUS;
-  const z=Math.cos(boatAngle)*BOAT_RADIUS;
-
-  boatMover.position.x=x;
-  boatMover.position.y=BOAT_Y;
-  boatMover.position.z=z;
-
-  // Tangent direction around the circle.
-  boatMover.rotation.y=boatAngle+Math.PI/2;
+  if(boatMixer)boatMixer.update(dt);
 }
 
 function tick(){
@@ -3608,6 +3599,7 @@ function tick(){
 
   updateNPCs(dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
+  if(extEnvMixer)extEnvMixer.update(dt);
   updateBoatMotion(dt);
   updateAtmosphericClouds(dt);
   updateSnow(dt);
