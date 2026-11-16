@@ -31,12 +31,15 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #currentProgressSection{display:none}
 #historySummary{font-size:16px;font-weight:800;color:#42362f;margin:4px 42px 14px 0}
 #historyGrid{display:block}
-#progressStage{position:relative;width:min(100%,700px);margin:0 auto;background:#f7f3ef;border-radius:18px;padding:14px;box-sizing:border-box}
-#progressImage{display:block;width:100%;height:min(50vh,480px);object-fit:contain;background:#fff;border-radius:12px;cursor:pointer}
-.progressNav{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:19px;background:rgba(55,43,35,.72);color:#fff;font-size:22px;cursor:pointer}
-#progressPrev{left:22px}
-#progressNext{right:22px}
-#progressMeta{text-align:center;margin-top:10px;font-size:12px;color:#6b5a50}
+#progressStage{position:relative;width:min(100%,760px);height:min(48vh,430px);margin:0 auto;background:#f7f3ef;border-radius:18px;padding:14px;box-sizing:border-box;overflow:hidden}
+#progressCarousel{position:relative;width:100%;height:calc(100% - 32px);display:flex;align-items:center;justify-content:center}
+.progressSlide{position:absolute;top:50%;left:50%;width:min(66%,500px);height:92%;object-fit:contain;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.16);transition:transform .26s ease,opacity .26s ease,filter .26s ease;cursor:pointer;transform-origin:center center}
+.progressSlide.center{transform:translate(-50%,-50%) scale(1);opacity:1;z-index:5;filter:none}
+.progressSlide.left1{transform:translate(-82%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
+.progressSlide.right1{transform:translate(-18%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
+.progressSlide.left2{transform:translate(-101%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
+.progressSlide.right2{transform:translate(1%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
+#progressMeta{text-align:center;margin-top:8px;font-size:12px;color:#6b5a50}
 #progressActions{display:flex;justify-content:center;gap:10px;margin:16px 0 0;flex-wrap:wrap}
 #completeWorkBtn,#deleteCurrentWorkBtn{width:auto;min-width:180px;max-width:280px;margin:0;border:0;border-radius:13px;padding:11px 16px;font-weight:900;cursor:pointer}
 #completeWorkBtn{background:#5d493d;color:white}
@@ -65,7 +68,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v7.7 · progress slider + authenticated archive + deletion</div>
+  <div id="version">controller v7.8 · per-work timer + coverflow progress</div>
 </div>
 <div id="timerPanel"><span id="workTimer">오늘 0분 그림 그렸어요</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -86,9 +89,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
       <div id="historySummary">현재 작품 진행 과정</div>
       <div id="historyGrid">
         <div id="progressStage">
-          <img id="progressImage" alt="현재 작품 진행 과정"/>
-          <button id="progressPrev" class="progressNav" aria-label="이전 단계">‹</button>
-          <button id="progressNext" class="progressNav" aria-label="다음 단계">›</button>
+          <div id="progressCarousel"></div>
           <div id="progressMeta"></div>
         </div>
       </div>
@@ -144,9 +145,7 @@ const historyClose=document.getElementById('historyClose');
 const currentProgressSection=document.getElementById('currentProgressSection');
 const historySummary=document.getElementById('historySummary');
 const historyGrid=document.getElementById('historyGrid');
-const progressImage=document.getElementById('progressImage');
-const progressPrev=document.getElementById('progressPrev');
-const progressNext=document.getElementById('progressNext');
+const progressCarousel=document.getElementById('progressCarousel');
 const progressMeta=document.getElementById('progressMeta');
 const completeWorkBtn=document.getElementById('completeWorkBtn');
 const deleteCurrentWorkBtn=document.getElementById('deleteCurrentWorkBtn');
@@ -262,6 +261,7 @@ let mySeat=null;
 let playerArtworkSeat=null;
 let workElapsedSeconds=0;
 let totalWorkElapsedSeconds=0;
+let currentWorkElapsedSeconds=0;
 let workSaveAccumulator=0;
 let dailyWorkSyncAccumulator=0;
 const STORAGE_KEY='atelier3d_progress_v1';
@@ -1599,6 +1599,8 @@ async function findActiveWork(){
   if(existing){
     activeWorkId=existing.id;
     activeWorkCoverUrl=existing.cover_image_url||null;
+    currentWorkElapsedSeconds=Math.max(currentWorkElapsedSeconds,Number(existing.total_work_seconds)||0);
+    saveProgress();
     return activeWorkId;
   }
 
@@ -1615,7 +1617,7 @@ async function ensureActiveWork(){
       owner_id:ownerId,
       display_name:displayName,
       status:'active',
-      total_work_seconds:Math.floor(workElapsedSeconds)
+      total_work_seconds:Math.floor(currentWorkElapsedSeconds)
     })
     .select()
     .single();
@@ -1671,7 +1673,7 @@ async function completeCurrentWork(){
     .update({
       status:'completed',
       completed_at:new Date().toISOString(),
-      total_work_seconds:Math.floor(workElapsedSeconds),
+      total_work_seconds:Math.floor(currentWorkElapsedSeconds),
       cover_image_url:activeWorkCoverUrl
     })
     .eq('id',workId)
@@ -1686,7 +1688,9 @@ async function completeCurrentWork(){
 
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  showStatus('작품을 완성했어요 · 다음 업로드부터 새 작품으로 시작해요',3200);
+  currentWorkElapsedSeconds=0;
+  saveProgress();
+  showStatus('작품을 완성했어요 · 다음 작품은 0분부터 시작해요',3200);
   await loadMyHistory();
 }
 
@@ -1725,6 +1729,7 @@ async function deleteWorkCompletely(workId,{active=false}={}){
   if(active){
     activeWorkId=null;
     activeWorkCoverUrl=null;
+    currentWorkElapsedSeconds=0;
     if(playerArtworkSeat)clearArtworkFromSeat(playerArtworkSeat);
     savedArtworkDataUrl=null;
     savedArtworkSeatIndex=null;
@@ -1818,7 +1823,7 @@ async function loadMyHistory(){
     progressSlideIndex=history.length-1;
     completeWorkBtn.disabled=false;
     deleteCurrentWorkBtn.disabled=false;
-    historySummary.textContent=`현재 작품 진행 과정 · ${history.length}단계 · 오늘 ${formatTodayWork(todaySeconds)}`;
+    historySummary.textContent=`현재 작품 진행 과정 · ${history.length}단계 · 이 작품 ${formatTodayWork(currentWorkElapsedSeconds)}`;
     renderProgressSlide();
   }else{
     currentProgressSection.style.display='none';
@@ -1866,34 +1871,46 @@ async function loadMyHistory(){
   }
 }
 function renderProgressSlide(){
+  progressCarousel.innerHTML='';
   if(!progressSlides.length)return;
-  progressSlideIndex=Math.max(0,Math.min(progressSlideIndex,progressSlides.length-1));
-  const item=progressSlides[progressSlideIndex];
 
-  progressImage.src=item.image_url;
-  const when=new Date(item.created_at);
-  progressMeta.textContent=`${progressSlideIndex+1} / ${progressSlides.length} · ${when.toLocaleDateString()} · ${formatTodayWork(item.work_seconds||0)}`;
-  progressPrev.style.visibility=progressSlides.length>1?'visible':'hidden';
-  progressNext.style.visibility=progressSlides.length>1?'visible':'hidden';
+  progressSlideIndex=Math.max(0,Math.min(progressSlideIndex,progressSlides.length-1));
+  const active=progressSlides[progressSlideIndex];
+
+  const offsets=[-2,-1,0,1,2];
+  for(const offset of offsets){
+    const index=progressSlideIndex+offset;
+    if(index<0 || index>=progressSlides.length)continue;
+
+    const item=progressSlides[index];
+    const img=document.createElement('img');
+    img.src=item.image_url;
+    img.alt=`진행 ${index+1}단계`;
+    img.className='progressSlide '+(
+      offset===0?'center':
+      offset===-1?'left1':
+      offset===1?'right1':
+      offset===-2?'left2':'right2'
+    );
+
+    img.addEventListener('click',()=>{
+      if(index===progressSlideIndex){
+        artPreview.src=item.image_url;
+        artMeta.textContent=`진행 ${index+1}/${progressSlides.length} · 이 작품 ${formatTodayWork(item.work_seconds||0)}`;
+        artModal.classList.add('show');
+        return;
+      }
+      progressSlideIndex=index;
+      renderProgressSlide();
+    });
+
+    progressCarousel.appendChild(img);
+  }
+
+  const when=new Date(active.created_at);
+  progressMeta.textContent=`${progressSlideIndex+1} / ${progressSlides.length} · ${when.toLocaleDateString()} · 이 작품 ${formatTodayWork(active.work_seconds||0)}`;
 }
 
-progressPrev.addEventListener('click',()=>{
-  if(!progressSlides.length)return;
-  progressSlideIndex=(progressSlideIndex-1+progressSlides.length)%progressSlides.length;
-  renderProgressSlide();
-});
-progressNext.addEventListener('click',()=>{
-  if(!progressSlides.length)return;
-  progressSlideIndex=(progressSlideIndex+1)%progressSlides.length;
-  renderProgressSlide();
-});
-progressImage.addEventListener('click',()=>{
-  const item=progressSlides[progressSlideIndex];
-  if(!item)return;
-  artPreview.src=item.image_url;
-  artMeta.textContent=`진행 ${progressSlideIndex+1}/${progressSlides.length}`;
-  artModal.classList.add('show');
-});
 
 historyBtn.addEventListener('click',loadMyHistory);
 historyClose.addEventListener('click',()=>historyModal.classList.remove('show'));
@@ -2042,6 +2059,7 @@ function loadProgress(){
     workElapsedSeconds=(data.date===localDateKey())
       ? Math.max(0,Number(data.todaySeconds)||0)
       : 0;
+    currentWorkElapsedSeconds=Math.max(0,Number(data.currentWorkSeconds)||0);
 
     savedArtworkDataUrl=typeof data.artworkDataUrl==='string' ? data.artworkDataUrl : null;
     savedArtworkSeatIndex=Number.isInteger(data.artworkSeatIndex) ? data.artworkSeatIndex : null;
@@ -2057,6 +2075,7 @@ function saveProgress(){
       date:localDateKey(),
       todaySeconds:workElapsedSeconds,
       totalSeconds:totalWorkElapsedSeconds,
+      currentWorkSeconds:currentWorkElapsedSeconds,
       artworkDataUrl:savedArtworkDataUrl,
       artworkSeatIndex:savedArtworkSeatIndex,
       artworkLockedUntil:savedArtworkLockedUntil
@@ -2427,7 +2446,7 @@ function applyArtworkImage(img){
   savedArtworkLockedUntil=0;
   playerSeat.artworkLockedUntil=0;
   saveProgress();
-  enqueueArtworkSave(savedArtworkDataUrl,playerSeat.index,workElapsedSeconds)
+  enqueueArtworkSave(savedArtworkDataUrl,playerSeat.index,currentWorkElapsedSeconds)
     .then(()=>showStatus('작품 진행 단계가 저장됐어요'));
   showStatus('작품 저장 중...');
 }
@@ -2911,6 +2930,7 @@ function updateWorkTimer(dt){
   if(playerSeat){
     workElapsedSeconds+=dt;
     totalWorkElapsedSeconds+=dt;
+    currentWorkElapsedSeconds+=dt;
     workSaveAccumulator+=dt;
     dailyWorkSyncAccumulator+=dt;
     if(workSaveAccumulator>=5){
@@ -2920,6 +2940,12 @@ function updateWorkTimer(dt){
     if(dailyWorkSyncAccumulator>=10){
       dailyWorkSyncAccumulator=0;
       syncDailyWorkToServer();
+      if(activeWorkId){
+        supabase.from('atelier_works')
+          .update({total_work_seconds:Math.floor(currentWorkElapsedSeconds)})
+          .eq('id',activeWorkId)
+          .eq('owner_id',ownerId);
+      }
     }
   }
 
