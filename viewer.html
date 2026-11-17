@@ -293,15 +293,23 @@ function applyNamedNightLights(factor){
     if(!isFlower && !isWindow)return;
 
     const mats=Array.isArray(o.material)?o.material:[o.material];
-    for(const mat of mats){
+    for(let i=0;i<mats.length;i++){
+      let mat=mats[i];
       if(!mat || !('emissive' in mat))continue;
+
       if(!mat.userData._nightInit){
-        mat=mat.clone?.()||mat;
+        const cloned=mat.clone();
+        cloned.userData={...mat.userData,_nightInit:true};
+        if(Array.isArray(o.material))o.material[i]=cloned;
+        else o.material=cloned;
+        mat=cloned;
       }
+
       if(!mat.userData._nightBaseEmissive){
         mat.userData._nightBaseEmissive=mat.emissive.clone();
         mat.userData._nightBaseIntensity=Number(mat.emissiveIntensity)||0;
       }
+
       mat.emissive.set(isFlower?0xffc77a:0xffb36b);
       mat.emissiveIntensity=(isFlower?2.2:1.7)*factor;
       mat.needsUpdate=true;
