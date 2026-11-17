@@ -64,6 +64,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #artCard{position:relative;width:min(78vw,920px);max-height:78vh;padding:18px;box-sizing:border-box;overflow:hidden;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
 #artCard img{display:block;width:auto;height:auto;max-width:100%;max-height:64vh;margin:0 auto;object-fit:contain;border-radius:10px;background:#f7f4ed}
 #artMeta{margin-top:10px;font-size:13px;color:#4b3a30;text-align:center}
+#artLikeRow{display:flex;justify-content:center;align-items:center;margin-top:10px}
+#artLikeBtn{border:0;border-radius:999px;padding:8px 13px;background:#f2ebe5;color:#6a5043;font-weight:800;cursor:pointer;min-width:92px}
+#artLikeBtn.liked{background:#ffe5ea;color:#b63858}
+#artLikeBtn:disabled{opacity:.45;cursor:default}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 </style>
 </head>
@@ -73,7 +77,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.3.1 · locale startup fix</div>
+  <div id="version">controller v9.4 · likes + night sky + nearby greetings</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -85,6 +89,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
     <button id="artClose" aria-label="닫기">×</button>
     <img id="artPreview" alt="작품 크게 보기"/>
     <div id="artMeta"></div>
+    <div id="artLikeRow"><button id="artLikeBtn" type="button">♡ 0</button></div>
   </div>
 </div>
 <div id="historyModal">
@@ -143,6 +148,7 @@ const artUpload=document.getElementById('artUpload');
 const artModal=document.getElementById('artModal');
 const artPreview=document.getElementById('artPreview');
 const artMeta=document.getElementById('artMeta');
+const artLikeBtn=document.getElementById('artLikeBtn');
 const artClose=document.getElementById('artClose');
 const historyBtn=document.getElementById('historyBtn');
 const historyModal=document.getElementById('historyModal');
@@ -215,7 +221,8 @@ const pmrem=new THREE.PMREMGenerator(renderer);
 scene.environment=pmrem.fromScene(new RoomEnvironment(),.04).texture;
 scene.environmentIntensity=.38;
 
-scene.add(new THREE.HemisphereLight(0xfff5e9,0x758797,1.08));
+const hemi=new THREE.HemisphereLight(0xfff5e9,0x758797,1.08);
+scene.add(hemi);
 
 const sun=new THREE.DirectionalLight(0xffddb5,1.72);
 sun.position.set(-8,10,-4);
@@ -234,6 +241,91 @@ const fill=new THREE.DirectionalLight(0xc6ddff,.35);
 fill.position.set(6,5,5);
 scene.add(fill);
 
+const DAY_SKY=new THREE.Color(0xd8e6ee);
+const NIGHT_SKY=new THREE.Color(0x08111f);
+let nightFactor=0;
+let lastNightLightingUpdate=0;
+
+function createStarField(){
+  const count=260;
+  const pos=new Float32Array(count*3);
+  for(let i=0;i<count;i++){
+    const r=24+Math.random()*18;
+    const a=Math.random()*Math.PI*2;
+    const y=10+Math.random()*18;
+    pos[i*3]=Math.cos(a)*r;
+    pos[i*3+1]=y;
+    pos[i*3+2]=Math.sin(a)*r;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const m=new THREE.PointsMaterial({
+    color:0xffffff,
+    size:.09,
+    transparent:true,
+    opacity:0,
+    depthWrite:false,
+    sizeAttenuation:true
+  });
+  const stars=new THREE.Points(g,m);
+  stars.name='Atelier Stars';
+  stars.frustumCulled=false;
+  scene.add(stars);
+  return stars;
+}
+const starField=createStarField();
+
+function computeNightFactor(){
+  const d=new Date();
+  const h=d.getHours()+d.getMinutes()/60;
+  if(h>=20 || h<5)return 1;
+  if(h>=17.5 && h<20)return THREE.MathUtils.smoothstep((h-17.5)/2.5,0,1);
+  if(h>=5 && h<7)return 1-THREE.MathUtils.smoothstep((h-5)/2,0,1);
+  return 0;
+}
+
+function applyNamedNightLights(factor){
+  scene.traverse(o=>{
+    if(!o.isMesh || !o.material)return;
+    const n=(o.name||'').toUpperCase();
+    const isFlower=n.startsWith('FLOWER_LIGHT_');
+    const isWindow=n.startsWith('HOUSE_WINDOW_');
+    if(!isFlower && !isWindow)return;
+
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    for(const mat of mats){
+      if(!mat || !('emissive' in mat))continue;
+      if(!mat.userData._nightInit){
+        mat=mat.clone?.()||mat;
+      }
+      if(!mat.userData._nightBaseEmissive){
+        mat.userData._nightBaseEmissive=mat.emissive.clone();
+        mat.userData._nightBaseIntensity=Number(mat.emissiveIntensity)||0;
+      }
+      mat.emissive.set(isFlower?0xffc77a:0xffb36b);
+      mat.emissiveIntensity=(isFlower?2.2:1.7)*factor;
+      mat.needsUpdate=true;
+    }
+  });
+}
+
+function updateDayNightLighting(force=false){
+  const now=performance.now();
+  if(!force && now-lastNightLightingUpdate<1000)return;
+  lastNightLightingUpdate=now;
+
+  nightFactor=computeNightFactor();
+  scene.background=DAY_SKY.clone().lerp(NIGHT_SKY,nightFactor);
+  hemi.intensity=THREE.MathUtils.lerp(1.08,.23,nightFactor);
+  sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
+  fill.intensity=THREE.MathUtils.lerp(.35,.15,nightFactor);
+  scene.environmentIntensity=THREE.MathUtils.lerp(.38,.12,nightFactor);
+  starField.material.opacity=Math.max(0,(nightFactor-.15)/.85)*.95;
+  starField.visible=nightFactor>.08;
+  applyNamedNightLights(nightFactor);
+}
+updateDayNightLighting(true);
+
 const loader=new GLTFLoader();
 const clock=new THREE.Clock();
 
@@ -251,6 +343,7 @@ let currentUser=null;
 let artworkSaveQueue=Promise.resolve();
 let progressSlides=[];
 let progressSlideIndex=0;
+let previewWorkId=null;
 const ARTIST_NAMES_KO=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
 const ARTIST_QUIRKS_KO=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
 const ARTIST_NAMES_EN=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
@@ -1263,6 +1356,7 @@ function clearServerArtworkVisuals(){
       seat.userData=seat.userData||{};
       delete seat.userData.artworkDataUrl;
       delete seat.userData.artworkMeta;
+      delete seat.userData.workId;
     }
   }
 }
@@ -1289,7 +1383,8 @@ function applyServerArtworks(rows){
     if(row.owner_id===ownerId)continue;
 
     seat.userData.artworkDataUrl=row.image_url;
-    seat.userData.artworkMeta=(row.display_name||'Painter')+' · 작업 '+Math.max(1,Math.round((row.work_seconds||0)/60))+'분';
+    seat.userData.artworkMeta=(row.display_name||'Painter')+' · '+t('작업 ','work ')+Math.max(1,Math.round((row.work_seconds||0)/60))+t('분',' min');
+    seat.userData.workId=row.work_id||null;
     const img=new Image();
     img.crossOrigin='anonymous';
     img.onload=()=>getCanvasMeshesForSeat(seat).forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
@@ -1371,7 +1466,7 @@ function ensureRemoteAvatar(id,state={}){
     const actions={};
     window.__atelierAvatarClips?.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
     scene.add(root);
-    entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0};
+    entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0,displayName:state.displayName||null,lastGreetingAt:0};
     setAvatarNameLabel(root,state.displayName||'이름 없는 화가');
     const initialLabel=root.getObjectByName('Player Name Label');
     if(initialLabel)initialLabel.visible=false;
@@ -1382,7 +1477,10 @@ function ensureRemoteAvatar(id,state={}){
   }else{
     recolorBeret(entry.model,standingHatColorForClient(id));
   }
-  if(state.displayName)setAvatarNameLabel(entry.root,state.displayName);
+  if(state.displayName){
+    entry.displayName=state.displayName;
+    setAvatarNameLabel(entry.root,state.displayName);
+  }
   return entry;
 }
 
@@ -1523,6 +1621,36 @@ function broadcastMotion(force=false){
   });
 }
 
+const GREET_DISTANCE=1.55;
+const GREET_COOLDOWN_MS=18000;
+const GREET_DISPLAY_MS=2200;
+
+function maybeTriggerNearbyGreeting(entry,distance){
+  if(distance>GREET_DISTANCE)return;
+  const now=performance.now();
+  if(now-(entry.lastGreetingAt||0)<GREET_COOLDOWN_MS)return;
+
+  entry.lastGreetingAt=now;
+  const base=entry.root.getObjectByName('Player Name Label')?.userData?.labelText || t('이름 없는 화가','Unnamed artist');
+
+  const greetAction=entry.actions?.['Avatar_Greet'];
+  if(greetAction){
+    playRemote(entry,'Avatar_Greet');
+    setTimeout(()=>{
+      if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
+    },1600);
+  }
+
+  setAvatarNameLabel(entry.root,t('👋 반가워요!','👋 Hi!'));
+  const label=entry.root.getObjectByName('Player Name Label');
+  if(label)label.visible=true;
+
+  setTimeout(()=>{
+    if(!remoteAvatars.has(entry.clientId))return;
+    setAvatarNameLabel(entry.root,entry.displayName||base);
+  },GREET_DISPLAY_MS);
+}
+
 function updateProximityNameLabels(){
   if(!avatarRoot)return;
 
@@ -1537,6 +1665,7 @@ function updateProximityNameLabels(){
     const dx=entry.root.position.x-avatarRoot.position.x;
     const dz=entry.root.position.z-avatarRoot.position.z;
     const d=Math.hypot(dx,dz);
+    maybeTriggerNearbyGreeting(entry,d);
 
     if(label.visible){
       if(d>hideDistance)label.visible=false;
@@ -1582,6 +1711,7 @@ function startRealtimeSync(){
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_easels'},fetchServerState)
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_artworks'},fetchServerState)
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_presence'},handlePresenceChange)
+    .on('postgres_changes',{event:'*',schema:'public',table:'atelier_likes'},()=>{ if(artModal.classList.contains('show'))refreshPreviewLikeState(); })
     .on('broadcast',{event:'motion'},handleRemoteMotion)
     .subscribe(status=>{
       if(status==='SUBSCRIBED')broadcastMotion(true);
@@ -1994,12 +2124,11 @@ async function loadMyHistory(){
       img.alt='완성 작품';
       img.addEventListener('click',()=>{
         if(!work.cover_image_url)return;
-        artPreview.src=work.cover_image_url;
         const when=work.completed_at?new Date(work.completed_at):null;
-        artMeta.textContent=when
-          ? `완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`
-          : '완성 작품';
-        artModal.classList.add('show');
+        const meta=when
+          ? t(`완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`,`Completed · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`)
+          : t('완성 작품','Completed artwork');
+        openArtworkModal(work.cover_image_url,meta,work.id);
       });
 
       const meta=document.createElement('div');
@@ -2034,9 +2163,12 @@ function buildProgressSlides(){
 
     img.addEventListener('click',()=>{
       if(index===progressSlideIndex){
-        artPreview.src=item.image_url;
-        artMeta.textContent=`진행 ${index+1}/${progressSlides.length} · 이 작품 ${formatTodayWork(item.work_seconds||0)}`;
-        artModal.classList.add('show');
+        openArtworkModal(
+          item.image_url,
+          t(`진행 ${index+1}/${progressSlides.length} · 이 작품 ${formatTodayWork(item.work_seconds||0)}`,
+            `Progress ${index+1}/${progressSlides.length} · ${formatTodayWork(item.work_seconds||0)}`),
+          item.work_id||activeWorkId
+        );
         return;
       }
       progressSlideIndex=index;
@@ -2415,20 +2547,105 @@ function getSeatArtworkDataUrl(seat){
   return null;
 }
 
+async function refreshPreviewLikeState(){
+  if(!previewWorkId){
+    artLikeBtn.style.display='none';
+    return;
+  }
+
+  artLikeBtn.style.display='inline-flex';
+  artLikeBtn.disabled=false;
+
+  const countQuery=supabase
+    .from('atelier_likes')
+    .select('*',{count:'exact',head:true})
+    .eq('work_id',previewWorkId);
+
+  let liked=false;
+  const [countRes,ownRes]=await Promise.all([
+    countQuery,
+    currentUser
+      ? supabase.from('atelier_likes').select('work_id').eq('work_id',previewWorkId).eq('user_id',currentUser.id).maybeSingle()
+      : Promise.resolve({data:null,error:null})
+  ]);
+
+  if(countRes.error)console.warn('like count',countRes.error);
+  if(ownRes.error)console.warn('like own',ownRes.error);
+
+  liked=!!ownRes.data;
+  const count=countRes.count||0;
+  artLikeBtn.classList.toggle('liked',liked);
+  artLikeBtn.textContent=`${liked?'♥':'♡'} ${count}`;
+}
+
+async function openArtworkModal(src,meta,workId=null){
+  if(!src)return false;
+  previewWorkId=workId||null;
+  artPreview.src=src;
+  artMeta.textContent=meta||'';
+  artModal.classList.add('show');
+  await refreshPreviewLikeState();
+  return true;
+}
+
+artLikeBtn.addEventListener('click',async ()=>{
+  if(!previewWorkId)return;
+  if(!currentUser){
+    artModal.classList.remove('show');
+    accountModal.classList.add('show');
+    accountState.textContent=t(
+      '좋아요를 누르려면 먼저 로그인해 주세요.',
+      'Log in to like artworks.'
+    );
+    return;
+  }
+
+  artLikeBtn.disabled=true;
+  const {data:existing,error:checkError}=await supabase
+    .from('atelier_likes')
+    .select('work_id')
+    .eq('work_id',previewWorkId)
+    .eq('user_id',currentUser.id)
+    .maybeSingle();
+
+  if(checkError){
+    console.warn('like lookup',checkError);
+    artLikeBtn.disabled=false;
+    return;
+  }
+
+  if(existing){
+    const {error}=await supabase
+      .from('atelier_likes')
+      .delete()
+      .eq('work_id',previewWorkId)
+      .eq('user_id',currentUser.id);
+    if(error)console.warn('unlike',error);
+  }else{
+    const {error}=await supabase
+      .from('atelier_likes')
+      .insert({work_id:previewWorkId,user_id:currentUser.id});
+    if(error)console.warn('like',error);
+  }
+  await refreshPreviewLikeState();
+});
+
 function openArtworkPreview(seat){
   const src=getSeatArtworkDataUrl(seat);
   if(!src)return false;
-  artPreview.src=src;
-  artMeta.textContent=seat===playerArtworkSeat
-    ? `내 작품 · 작업시간 ${formatDuration(workElapsedSeconds)}`
-    : (seat.userData?.artworkMeta || '아틀리에 작품');
-  artModal.classList.add('show');
+  const meta=seat===playerArtworkSeat
+    ? t(`내 작품 · 작업시간 ${formatDuration(currentWorkElapsedSeconds)}`,`My artwork · ${formatDuration(currentWorkElapsedSeconds)}`)
+    : (seat.userData?.artworkMeta || t('아틀리에 작품','Atelier artwork'));
+  const workId=seat===playerArtworkSeat ? activeWorkId : (seat.userData?.workId||null);
+  openArtworkModal(src,meta,workId);
   return true;
 }
 
 function closeArtworkPreview(){
   artModal.classList.remove('show');
   artPreview.removeAttribute('src');
+  previewWorkId=null;
+  artLikeBtn.style.display='none';
 }
 
 artClose.addEventListener('click',closeArtworkPreview);
@@ -3851,6 +4068,7 @@ function tick(){
   updateBoatMotion(dt);
   updateAtmosphericClouds(dt);
   updateSnow(dt);
+  updateDayNightLighting();
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
