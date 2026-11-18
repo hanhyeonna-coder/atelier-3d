@@ -35,12 +35,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #progressCarousel{position:relative;width:100%;height:calc(100% - 32px);display:flex;align-items:center;justify-content:center}
 .progressSlide{position:absolute;top:50%;left:50%;width:min(66%,500px);height:92%;object-fit:contain;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.16);transition:transform .48s cubic-bezier(.22,.8,.22,1),opacity .42s ease,filter .42s ease;cursor:pointer;transform-origin:center center;will-change:transform,opacity}
 .progressSlide.center{transform:translate(-50%,-50%) scale(1);opacity:1;z-index:5;filter:none}
-.progressSlide.left1{transform:translate(-82%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
-.progressSlide.right1{transform:translate(-18%,-50%) scale(.72);opacity:.58;z-index:4;filter:saturate(.75)}
-.progressSlide.left2{transform:translate(-101%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
-.progressSlide.right2{transform:translate(1%,-50%) scale(.52);opacity:.28;z-index:3;filter:saturate(.55)}
-.progressSlide.hiddenLeft{transform:translate(-120%,-50%) scale(.42);opacity:0;z-index:1}
-.progressSlide.hiddenRight{transform:translate(20%,-50%) scale(.42);opacity:0;z-index:1}
+.progressSlide.left1{transform:translate(-108%,-50%) scale(.70);opacity:.82;z-index:4;filter:saturate(.82) brightness(.96)}
+.progressSlide.right1{transform:translate(8%,-50%) scale(.70);opacity:.82;z-index:4;filter:saturate(.82) brightness(.96)}
+.progressSlide.left2{transform:translate(-132%,-50%) scale(.50);opacity:0;z-index:2;pointer-events:none}
+.progressSlide.right2{transform:translate(32%,-50%) scale(.50);opacity:0;z-index:2;pointer-events:none}
+.progressSlide.hiddenLeft{transform:translate(-145%,-50%) scale(.42);opacity:0;z-index:1;pointer-events:none}
+.progressSlide.hiddenRight{transform:translate(45%,-50%) scale(.42);opacity:0;z-index:1;pointer-events:none}
 #progressMeta{text-align:center;margin-top:8px;font-size:12px;color:#6b5a50}
 #progressActions{display:flex;justify-content:center;gap:10px;margin:16px 0 0;flex-wrap:wrap}
 #completeWorkBtn,#deleteCurrentWorkBtn{width:auto;min-width:180px;max-width:280px;margin:0;border:0;border-radius:13px;padding:11px 16px;font-weight:900;cursor:pointer}
@@ -80,7 +80,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.4.2 · protect local artwork during sync</div>
+  <div id="version">controller v9.4.3 · cleaner progress coverflow</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
