@@ -80,7 +80,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.4.1 · polished like button</div>
+  <div id="version">controller v9.4.2 · protect local artwork during sync</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -1352,6 +1352,12 @@ function syncRemoteAvatars(){
 
 function clearServerArtworkVisuals(){
   for(const seat of seatSlots){
+    const isLocalCurrentArtwork=
+      seat===playerArtworkSeat ||
+      (savedArtworkSeatIndex===seat.index && !!savedArtworkDataUrl);
+
+    if(isLocalCurrentArtwork)continue;
+
     if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId){
       const canvases=getCanvasMeshesForSeat(seat);
       canvases.forEach(mesh=>{
@@ -1382,8 +1388,14 @@ function applyServerArtworks(rows){
     seat.artworkLockedUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
     if(!seat.userData)seat.userData={};
     if(!row){
-      delete seat.userData.artworkDataUrl;
-      delete seat.userData.artworkMeta;
+      const isLocalCurrentArtwork=
+        seat===playerArtworkSeat ||
+        (savedArtworkSeatIndex===seat.index && !!savedArtworkDataUrl);
+      if(!isLocalCurrentArtwork){
+        delete seat.userData.artworkDataUrl;
+        delete seat.userData.artworkMeta;
+        delete seat.userData.workId;
+      }
     }
   }
 
@@ -2298,7 +2310,7 @@ async function syncArtworkSnapshot(snapshot){
   activeWorkCoverUrl=stored.url;
 
   await supabase.from('atelier_artworks').delete().eq('owner_id',ownerId);
-  await supabase.from('atelier_artworks').upsert({
+  const {error:artworkUpsertError}=await supabase.from('atelier_artworks').upsert({
     owner_id:ownerId,
     seat_index:seat.index,
     image_url:stored.url,
@@ -2309,6 +2321,17 @@ async function syncArtworkSnapshot(snapshot){
     locked_until:null,
     updated_at:new Date().toISOString()
   },{onConflict:'seat_index'});
+
+  if(artworkUpsertError){
+    console.warn('artwork upsert',artworkUpsertError);
+    showStatus(t('작품 저장에 실패했어요','Failed to save artwork'));
+    return;
+  }
+
+  seat.serverArtworkOwner=ownerId;
+  seat.userData=seat.userData||{};
+  seat.userData.workId=workId;
+  seat.userData.artworkDataUrl=stored.url;
 
   const {error:historyError}=await supabase.from('atelier_artwork_history').insert({
     owner_id:ownerId,
