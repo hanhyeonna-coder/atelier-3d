@@ -64,9 +64,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #artCard{position:relative;width:min(78vw,920px);max-height:78vh;padding:18px;box-sizing:border-box;overflow:hidden;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
 #artCard img{display:block;width:auto;height:auto;max-width:100%;max-height:64vh;margin:0 auto;object-fit:contain;border-radius:10px;background:#f7f4ed}
 #artMeta{margin-top:10px;font-size:13px;color:#4b3a30;text-align:center}
-#artLikeRow{display:flex;justify-content:center;align-items:center;margin-top:10px}
-#artLikeBtn{border:0;border-radius:999px;padding:8px 13px;background:#f2ebe5;color:#6a5043;font-weight:800;cursor:pointer;min-width:92px}
-#artLikeBtn.liked{background:#ffe5ea;color:#b63858}
+#artLikeRow{display:flex;justify-content:center;align-items:center;margin-top:12px}
+#artLikeBtn{border:0;border-radius:999px;padding:9px 15px;background:#f3ece7;color:#6a5043;font-weight:800;cursor:pointer;min-width:118px;display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1}
+#artLikeBtn .heart{font-size:17px;line-height:1}
+#artLikeBtn .label{font-size:13px}
+#artLikeBtn .count{font-size:13px;min-width:12px;text-align:left}
+#artLikeBtn.liked{background:#ffe6ec;color:#b73557}
 #artLikeBtn:disabled{opacity:.45;cursor:default}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 </style>
@@ -77,7 +80,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.4 · likes + night sky + nearby greetings</div>
+  <div id="version">controller v9.4.1 · polished like button</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -89,7 +92,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
     <button id="artClose" aria-label="닫기">×</button>
     <img id="artPreview" alt="작품 크게 보기"/>
     <div id="artMeta"></div>
-    <div id="artLikeRow"><button id="artLikeBtn" type="button">♡ 0</button></div>
+    <div id="artLikeRow"><button id="artLikeBtn" type="button"><span class="heart">♡</span><span class="label">좋아요</span><span class="count">0</span></button></div>
   </div>
 </div>
 <div id="historyModal">
@@ -2583,7 +2586,7 @@ async function refreshPreviewLikeState(){
   liked=!!ownRes.data;
   const count=countRes.count||0;
   artLikeBtn.classList.toggle('liked',liked);
-  artLikeBtn.textContent=`${liked?'♥':'♡'} ${count}`;
+  artLikeBtn.innerHTML=`<span class="heart">${liked?'♥':'♡'}</span><span class="label">${t('좋아요','Like')}</span><span class="count">${count}</span>`;
 }
 
 async function openArtworkModal(src,meta,workId=null){
