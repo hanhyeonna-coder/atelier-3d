@@ -80,7 +80,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="hud">
   <b>Atelier</b>
   <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.4.3 · cleaner progress coverflow</div>
+  <div id="version">controller v9.4.4 · centered cover artwork</div>
 </div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <button id="historyBtn">진행 기록</button>
@@ -2738,19 +2738,17 @@ function makeContainedArtworkTexture(img,aspect){
   c.height=texH;
   const ctx=c.getContext('2d');
 
-  ctx.fillStyle='#f7f4ed';
-  ctx.fillRect(0,0,texW,texH);
-
-  const imageAspect=img.naturalWidth/img.naturalHeight;
-  let drawW=texW;
-  let drawH=drawW/imageAspect;
-  if(drawH>texH){
-    drawH=texH;
-    drawW=drawH*imageAspect;
-  }
-
+  // Cover-style artwork placement:
+  // fill the entire canvas, keep the image centered,
+  // and crop only the overflowing long side.
+  const iw=img.naturalWidth||img.width;
+  const ih=img.naturalHeight||img.height;
+  const scale=Math.max(texW/iw,texH/ih);
+  const drawW=iw*scale;
+  const drawH=ih*scale;
   const x=(texW-drawW)/2;
   const y=(texH-drawH)/2;
+
   ctx.drawImage(img,x,y,drawW,drawH);
 
   const tex=new THREE.CanvasTexture(c);
