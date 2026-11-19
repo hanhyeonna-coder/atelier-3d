@@ -3608,20 +3608,23 @@ Promise.all([
   loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
+  loadGLB('./models/flower_light.glb').catch(()=>null),
   loadGLB('./models/atelier_boat.glb').catch(()=>null),
   loadGLB('./models/atelier_environment_ext_web.glb').catch(()=>null)
-]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,boatGLB,extEnvGLB])=>{
+]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,flowerLightGLB,boatGLB,extEnvGLB])=>{
   // Non-avatar GLBs must never contribute character meshes.
   // Catch both rigged duplicates and meshes accidentally exported as ordinary geometry.
   hideEmbeddedRiggedCharacters(envGLB?.scene);
   hideEmbeddedRiggedCharacters(furnitureGLB?.scene);
   hideEmbeddedRiggedCharacters(flowerGLB?.scene);
+  hideEmbeddedRiggedCharacters(flowerLightGLB?.scene);
   hideEmbeddedRiggedCharacters(boatGLB?.scene);
   hideEmbeddedRiggedCharacters(extEnvGLB?.scene);
 
   hideAvatarLikeMeshes(envGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(furnitureGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(flowerGLB?.scene,avGLB?.scene);
+  hideAvatarLikeMeshes(flowerLightGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(boatGLB?.scene,avGLB?.scene);
   hideAvatarLikeMeshes(extEnvGLB?.scene,avGLB?.scene);
 
@@ -3697,6 +3700,11 @@ Promise.all([
     keepOnlyFlowers(flowerGLB.scene);
     enhanceMaterials(flowerGLB.scene);
     scene.add(flowerGLB.scene);
+  }
+
+  if(flowerLightGLB){
+    enhanceMaterials(flowerLightGLB.scene);
+    scene.add(flowerLightGLB.scene);
   }
 
   createBridgeAndGalleryLot();
