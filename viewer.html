@@ -460,7 +460,7 @@ function applyNamedNightLights(factor){
             transparent:!!mat.transparent,
             opacity:Number.isFinite(mat.opacity)?mat.opacity:1,
             side:mat.side??THREE.FrontSide,
-            roughness:isFlower?.52:.42,
+            roughness:(isFlower ? .52 : .42),
             metalness:0
           });
         }
