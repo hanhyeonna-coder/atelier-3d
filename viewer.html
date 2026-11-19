@@ -359,28 +359,71 @@ function computeNightFactor(){
 
 const namedNightLightProxies=new Map();
 
+function makeWarmGlowTexture(){
+  const c=document.createElement('canvas');
+  c.width=c.height=256;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(128,128,8,128,128,120);
+  g.addColorStop(0,'rgba(255,242,190,.95)');
+  g.addColorStop(.22,'rgba(255,220,135,.68)');
+  g.addColorStop(.52,'rgba(255,190,90,.28)');
+  g.addColorStop(1,'rgba(255,170,70,0)');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,256,256);
+
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  return tex;
+}
+const warmGlowTexture=makeWarmGlowTexture();
+
 function ensureNamedNightLightProxy(o,isFlower,isWindow){
   if(namedNightLightProxies.has(o.uuid))return namedNightLightProxies.get(o.uuid);
 
-  // Flowers get a real warm point light. Windows get a much weaker light and are capped
-  // so 40+ windows do not overwhelm mobile GPUs.
+  // Flowers get a real warm point light + visible halo.
+  // Windows get weaker point lights and are capped for mobile performance.
   const existingWindowLights=[...namedNightLightProxies.values()].filter(x=>x.isWindow).length;
-  if(isWindow && existingWindowLights>=12)return null;
+  const allowPointLight=!(isWindow && existingWindowLights>=12);
 
-  const light=new THREE.PointLight(
-    isFlower?0xffc66d:0xffb768,
-    0,
-    isFlower?3.2:2.2,
-    2.1
-  );
-  light.castShadow=false;
+  let light=null;
+  if(allowPointLight){
+    light=new THREE.PointLight(
+      isFlower?0xffc66d:0xffb768,
+      0,
+      isFlower?3.6:2.4,
+      2.0
+    );
+    light.castShadow=false;
 
-  const pos=o.getWorldPosition(new THREE.Vector3());
-  light.position.copy(pos);
-  if(isFlower)light.position.y+=.06;
-  scene.add(light);
+    const pos=o.getWorldPosition(new THREE.Vector3());
+    light.position.copy(pos);
+    if(isFlower)light.position.y+=.08;
+    scene.add(light);
+  }
 
-  const info={light,isFlower,isWindow};
+  let halo=null;
+  if(isFlower){
+    const haloMat=new THREE.SpriteMaterial({
+      map:warmGlowTexture,
+      color:0xffd889,
+      transparent:true,
+      opacity:0,
+      depthWrite:false,
+      depthTest:true,
+      blending:THREE.AdditiveBlending
+    });
+    halo=new THREE.Sprite(haloMat);
+    halo.name='Flower Night Halo';
+    const pos=o.getWorldPosition(new THREE.Vector3());
+    halo.position.copy(pos);
+    halo.scale.set(1.05,1.05,1);
+    halo.renderOrder=6;
+    scene.add(halo);
+  }
+
+  const info={light,halo,isFlower,isWindow};
   namedNightLightProxies.set(o.uuid,info);
   return info;
 }
@@ -415,18 +458,18 @@ function applyNamedNightLights(factor){
       }
 
       mat.emissive.copy(mat.userData._nightBaseEmissive).lerp(
-        new THREE.Color(isFlower?0xffd07a:0xffbd73),
+        new THREE.Color(isFlower?0xffd36f:0xffc36f),
         factor
       );
       mat.emissiveIntensity=THREE.MathUtils.lerp(
         mat.userData._nightBaseIntensity,
-        isFlower?5.5:4.2,
+        isFlower?7.0:6.0,
         factor
       );
       if(mat.color && mat.userData._nightBaseColor){
         mat.color.copy(mat.userData._nightBaseColor).lerp(
-          new THREE.Color(isFlower?0xffe4aa:0xffd59a),
-          .18*factor
+          new THREE.Color(isFlower?0xffe8ad:0xffd28a),
+          (isFlower?.28:.72)*factor
         );
       }
       mat.needsUpdate=true;
@@ -434,12 +477,20 @@ function applyNamedNightLights(factor){
 
     const proxy=ensureNamedNightLightProxy(o,isFlower,isWindow);
     if(proxy){
-      proxy.light.intensity=(isFlower?2.5:.75)*factor;
+      if(proxy.light)proxy.light.intensity=(isFlower?3.2:1.05)*factor;
+      if(proxy.halo){
+        proxy.halo.material.opacity=.72*factor;
+        const haloScale=THREE.MathUtils.lerp(.72,1.28,factor);
+        proxy.halo.scale.set(haloScale,haloScale,1);
+      }
     }
   });
 
   for(const proxy of namedNightLightProxies.values()){
-    if(factor<=.01)proxy.light.intensity=0;
+    if(factor<=.01){
+      if(proxy.light)proxy.light.intensity=0;
+      if(proxy.halo)proxy.halo.material.opacity=0;
+    }
   }
 }
 
@@ -1158,6 +1209,44 @@ function recolorBeret(model,color){
     material:p.mat.name||''
   })), targetColor.getHexString());
 }
+function forceEaselWoodMaterials(root){
+  if(!root)return;
+
+  root.traverse(o=>{
+    if(!o.isMesh || !hasNamedAncestor(o,'easel'))return;
+
+    const objectName=(o.name||'').toLowerCase();
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+
+    const fixed=mats.map(mat=>{
+      if(!mat)return mat;
+      const materialName=(mat.name||'').toLowerCase();
+
+      // Never recolor the actual white painting canvas.
+      const isCanvas=
+        objectName.includes('canvas') ||
+        objectName.includes('painting') ||
+        objectName.includes('artwork') ||
+        materialName==='canvas' ||
+        materialName.includes('canvas');
+      if(isCanvas)return mat;
+
+      const m=mat.clone();
+      if(m.color)m.color.set('#6f4228');
+      if('roughness' in m)m.roughness=.58;
+      if('metalness' in m)m.metalness=0;
+      if('transmission' in m)m.transmission=0;
+      m.transparent=false;
+      m.opacity=1;
+      m.depthWrite=true;
+      m.needsUpdate=true;
+      return m;
+    });
+
+    o.material=Array.isArray(o.material)?fixed:fixed[0];
+  });
+}
+
 function keepOnlyFurniture(root){
   root.traverse(o=>{
     if(o===root)return;
@@ -3894,24 +3983,7 @@ Promise.all([
     furnitureScene=furnitureGLB.scene;
     keepOnlyFurniture(furnitureGLB.scene);
     enhanceMaterials(furnitureGLB.scene);
-
-    // Exported Clamp mesh uses Dark Oak. Force it here so it can never inherit Canvas white.
-    furnitureGLB.scene.traverse(o=>{
-      const n=(o.name||'').toLowerCase();
-      if(!o.isMesh || !n.includes('clamp'))return;
-
-      const mats=Array.isArray(o.material)?o.material:[o.material];
-      const fixed=mats.map(mat=>{
-        if(!mat)return mat;
-        const m=mat.clone();
-        if(m.color)m.color.set('#5b2f18');
-        if('roughness' in m)m.roughness=.56;
-        if('metalness' in m)m.metalness=0;
-        m.needsUpdate=true;
-        return m;
-      });
-      o.material=Array.isArray(o.material)?fixed:fixed[0];
-    });
+    forceEaselWoodMaterials(furnitureGLB.scene);
 
     scene.add(furnitureGLB.scene);
     keepFurnitureInsidePavilion(furnitureGLB.scene);
