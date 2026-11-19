@@ -7,12 +7,28 @@
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
 #app{position:fixed;inset:0}
-#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:700;color:#4b3a30}
-#hud{position:fixed;left:16px;top:16px;z-index:10;padding:10px 13px;border-radius:14px;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.1);pointer-events:none}
-#hud b{display:block;margin-bottom:5px}
-#timerPanel{position:fixed;right:18px;top:18px;z-index:11;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,.9);backdrop-filter:blur(10px);font-weight:800;font-size:14px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.12);pointer-events:none}
-#historyBtn{position:fixed;right:18px;top:68px;z-index:12;border:0;border-radius:13px;padding:9px 13px;background:rgba(55,43,35,.88);color:white;font-weight:700;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.14)}
-#accountBtn{position:fixed;right:18px;top:112px;z-index:12;border:0;border-radius:999px;padding:8px 12px;background:rgba(255,255,255,.94);color:#4b3a30;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.12);display:flex;align-items:center;gap:6px}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:800;color:#4b3a30}
+#loadingMessage{transition:opacity .28s ease,transform .28s ease;text-align:center;padding:0 24px}
+#loadingMessage.swap{opacity:0;transform:translateY(5px)}
+#hud{position:fixed;left:16px;top:16px;z-index:10;padding:9px 12px;border-radius:13px;background:rgba(255,255,255,.78);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.09);pointer-events:none}
+#hud b{display:block;margin:0}
+#version{opacity:.34;font-size:9px;margin-top:3px}
+#topActions{position:fixed;right:18px;top:18px;z-index:12;width:158px;display:flex;flex-direction:column;gap:8px}
+#timerPanel,#historyBtn,#accountBtn{position:static;width:100%;min-height:40px;box-sizing:border-box;border:1px solid rgba(93,73,61,.08);border-radius:13px;padding:9px 12px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);color:#4b3a30;box-shadow:0 7px 22px rgba(0,0,0,.10);font-weight:800;font-size:13px}
+#timerPanel{display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+#historyBtn,#accountBtn{cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+#historyBtn:hover,#accountBtn:hover{background:rgba(255,255,255,.98)}
+#controlHint{position:fixed;left:50%;bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px));transform:translate(-50%,10px);z-index:11;max-width:min(88vw,720px);color:#fff;font-size:13px;font-weight:750;text-align:center;line-height:1.4;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.72);opacity:0;transition:opacity .5s ease,transform .5s ease;pointer-events:none;white-space:normal}
+#controlHint.show{opacity:1;transform:translate(-50%,0)}
+@media (max-width:640px){
+  #hud{left:10px;top:10px;padding:8px 10px;max-width:calc(100vw - 164px)}
+  #hud b{font-size:13px}
+  #version{font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px}
+  #topActions{right:10px;top:10px;width:138px;gap:6px}
+  #timerPanel,#historyBtn,#accountBtn{min-height:36px;padding:8px 9px;border-radius:12px;font-size:12px}
+  #accountBtn{gap:4px}
+  #controlHint{bottom:max(30px,calc(env(safe-area-inset-bottom) + 18px));font-size:12px;max-width:86vw}
+}
 #accountModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:35;padding:20px;box-sizing:border-box}
 #accountModal.show{display:flex}
 #accountCard{position:relative;width:min(90vw,430px);padding:24px;border-radius:20px;background:rgba(255,255,255,.98);box-shadow:0 18px 60px rgba(0,0,0,.28);box-sizing:border-box}
@@ -58,7 +74,6 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 @media (hover:none){.completedDelete{opacity:.72;transform:scale(1)}}
 #statusToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:12;min-width:220px;max-width:min(80vw,560px);padding:11px 16px;border-radius:14px;background:rgba(55,43,35,.9);color:#fff;text-align:center;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.2);opacity:0;transition:opacity .18s ease;pointer-events:none}
 #statusToast.show{opacity:1}
-#version{opacity:.38;font-size:10px;margin-top:4px}
 #artModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:40;padding:24px;box-sizing:border-box}
 #artModal.show{display:flex}
 #artCard{position:relative;width:min(78vw,920px);max-height:78vh;padding:18px;box-sizing:border-box;overflow:hidden;border-radius:18px;background:rgba(255,255,255,.96);box-shadow:0 18px 60px rgba(0,0,0,.28)}
@@ -76,15 +91,17 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="loading">아틀리에 불러오는 중…</div>
+<div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
 <div id="hud">
   <b>Atelier</b>
-  <div>클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동</div>
-  <div id="version">controller v9.4.4 · centered cover artwork</div>
+  <div id="version">controller v9.5 · responsive HUD + rotating loading copy</div>
 </div>
-<div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
-<button id="historyBtn">진행 기록</button>
-<button id="accountBtn">👤 로그인</button>
+<div id="topActions">
+  <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
+  <button id="historyBtn">진행 기록</button>
+  <button id="accountBtn">👤 로그인</button>
+</div>
+<div id="controlHint"></div>
 <div id="statusToast"></div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -145,6 +162,8 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {createClient} from '@supabase/supabase-js';
 
 const loading=document.getElementById('loading');
+const loadingMessage=document.getElementById('loadingMessage');
+const controlHint=document.getElementById('controlHint');
 const status=document.getElementById('statusToast');
 const workTimer=document.getElementById('workTimer');
 const artUpload=document.getElementById('artUpload');
@@ -178,7 +197,7 @@ const accountTitle=document.getElementById('accountTitle');
 const accountDesc=document.getElementById('accountDesc');
 
 function applyLocaleUI(){
-  document.querySelector('#hud div').textContent=t(
+  controlHint.textContent=t(
     '클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동',
     'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
   );
@@ -197,6 +216,32 @@ function applyLocaleUI(){
   artPreview.alt=t('작품 크게 보기','Artwork preview');
 }
 applyLocaleUI();
+
+const loadingCopiesKo=[
+  '화실에 입장하는 중...',
+  '오늘도 같이 그림 그리자...',
+  '누군가 네 그림을 기다리고 있어'
+];
+const loadingCopiesEn=[
+  'Entering the atelier...',
+  'Let’s paint together today...',
+  'Someone is waiting to see your art'
+];
+let loadingCopyIndex=0;
+const loadingCopies=IS_KO?loadingCopiesKo:loadingCopiesEn;
+loadingMessage.textContent=loadingCopies[0];
+const loadingCopyTimer=setInterval(()=>{
+  if(!loading || loading.style.display==='none')return;
+  loadingMessage.classList.add('swap');
+  setTimeout(()=>{
+    loadingCopyIndex=(loadingCopyIndex+1)%loadingCopies.length;
+    loadingMessage.textContent=loadingCopies[loadingCopyIndex];
+    loadingMessage.classList.remove('swap');
+  },280);
+},1650);
+
+setTimeout(()=>controlHint.classList.add('show'),700);
+setTimeout(()=>controlHint.classList.remove('show'),7200);
 let statusHideTimer=null;
 function showStatus(message,ms=2200){
   status.textContent=message;
@@ -3732,11 +3777,14 @@ Promise.all([
   camTarget.copy(cameraFocus);
   updateCamera();
 
+  clearInterval(loadingCopyTimer);
   loading.style.display='none';
   showStatus('빈 이젤에 앉으면 그 자리가 내 이젤이 됩니다');
 }).catch(err=>{
   console.error(err);
-  loading.textContent='GLB 로드 실패';
+  clearInterval(loadingCopyTimer);
+  loadingMessage.textContent=t('화실을 불러오지 못했어요','Could not load the atelier');
+  loadingMessage.classList.remove('swap');
   showStatus(String(err));
 });
 
