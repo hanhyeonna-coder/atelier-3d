@@ -469,7 +469,7 @@ function applyNamedNightLights(factor){
       if(mat.color && mat.userData._nightBaseColor){
         mat.color.copy(mat.userData._nightBaseColor).lerp(
           new THREE.Color(isFlower?0xffe8ad:0xffd28a),
-          (isFlower?.28:.72)*factor
+          (isFlower ? .28 : .72)*factor
         );
       }
       mat.needsUpdate=true;
