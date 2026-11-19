@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>좀쓰화실</title>
+<title>좀쓰화실 DEBUG 01</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
@@ -87,10 +87,21 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #artLikeBtn.liked{background:#ffe6ec;color:#b73557}
 #artLikeBtn:disabled{opacity:.45;cursor:default}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
+
+#runtimeDebug{
+  position:fixed;left:10px;bottom:10px;z-index:99999;
+  background:rgba(178,32,32,.94);color:#fff;
+  padding:8px 10px;border-radius:8px;
+  font:700 11px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+  box-shadow:0 3px 12px rgba(0,0,0,.35);
+  pointer-events:none;white-space:pre;
+}
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="runtimeDebug">DEBUG 01
+booting…</div>
 <div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <div id="topActions">
@@ -257,6 +268,17 @@ function showStatus(message,ms=2200){
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
+const runtimeDebug=document.getElementById('runtimeDebug');
+window.__ATELIER_DEBUG_VERSION='DEBUG 01';
+function updateRuntimeDebug(extra=''){
+  if(!runtimeDebug)return;
+  const windows=Array.isArray(window.__debugNightWindows)?window.__debugNightWindows.length:0;
+  const flowers=Array.isArray(window.__debugFlowerLights)?window.__debugFlowerLights.length:0;
+  const stars=typeof starField!=='undefined' && starField?.children ? starField.children.length : 0;
+  runtimeDebug.textContent='DEBUG 01\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+(extra?'\n'+extra:'');
+}
+console.log('ATELIER DEBUG 01 loaded');
+
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
@@ -300,6 +322,26 @@ let lastNightLightingUpdate=0;
 const skyClouds=[];
 const waterCloudReflections=[];
 
+function makeStarGlowTexture(){
+  const c=document.createElement('canvas');
+  c.width=c.height=128;
+  const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(64,64,1,64,64,60);
+  g.addColorStop(0,'rgba(255,255,232,1)');
+  g.addColorStop(.10,'rgba(255,245,190,.95)');
+  g.addColorStop(.32,'rgba(255,222,135,.55)');
+  g.addColorStop(.65,'rgba(255,205,105,.20)');
+  g.addColorStop(1,'rgba(255,190,90,0)');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,128,128);
+  const tex=new THREE.CanvasTexture(c);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  return tex;
+}
+const starGlowTexture=makeStarGlowTexture();
+
 function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   const pos=new Float32Array(count*3);
   const clusters=[
@@ -324,7 +366,16 @@ function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
   const m=new THREE.PointsMaterial({
-    color,size,transparent:true,opacity:0,depthWrite:false,sizeAttenuation:true
+    color,
+    size:size*1.85,
+    map:starGlowTexture,
+    alphaMap:starGlowTexture,
+    transparent:true,
+    opacity:0,
+    depthWrite:false,
+    depthTest:true,
+    sizeAttenuation:true,
+    blending:THREE.AdditiveBlending
   });
   const stars=new THREE.Points(g,m);
   stars.frustumCulled=false;
@@ -360,7 +411,7 @@ function updateStarTwinkle(nowMs){
     const wave=.5+.5*Math.sin(t*(layer.userData.twinkleSpeed||.7)+(layer.userData.twinklePhase||0));
     const base=layer.userData.baseOpacity||.7;
     const strength=layer.userData.twinkleStrength||.2;
-    layer.material.opacity=nightOpacity*Math.max(.18,base-strength+wave*strength*2);
+    layer.material.opacity=nightOpacity*Math.max(.12,base-strength*1.15+wave*strength*2.5);
   });
 }
 
@@ -424,7 +475,9 @@ function registerNightWindows(root){
     nightWindowMeshes.push(o);
   });
 
+  window.__debugNightWindows=[...nightWindowMeshes];
   console.log('Registered night windows:',nightWindowMeshes.length,nightWindowMeshes.map(o=>o.name));
+  updateRuntimeDebug('windows registered');
 }
 
 function makeWarmGlowTexture(){
@@ -513,7 +566,9 @@ function registerFlowerNightLights(lightRoot,flowerRoot){
     flowerNightLights.push({anchor,light,halo});
   }
 
+  window.__debugFlowerLights=[...flowerNightLights];
   console.log('Registered flower night lights:',flowerNightLights.length,anchors.map(o=>o.name));
+  updateRuntimeDebug('flowers registered');
 }
 
 function updateRegisteredNightLights(factor){
@@ -4032,6 +4087,7 @@ Promise.all([
   registerNightWindows(scene);
   registerFlowerNightLights(scene,scene);
   updateDayNightLighting(true);
+  updateRuntimeDebug('assets loaded');
 
   createBridgeAndGalleryLot();
   createAtmosphericClouds();
@@ -4460,6 +4516,7 @@ function updateBoatMotion(dt){
   if(boatMixer)boatMixer.update(dt);
 }
 
+let lastRuntimeDebugUpdate=0;
 function tick(){
   requestAnimationFrame(tick);
 
@@ -4478,6 +4535,11 @@ function tick(){
   updateSnow(dt);
   updateDayNightLighting();
   updateStarTwinkle(performance.now());
+  const dbgNow=performance.now();
+  if(dbgNow-lastRuntimeDebugUpdate>1000){
+    lastRuntimeDebugUpdate=dbgNow;
+    updateRuntimeDebug('night '+nightFactor.toFixed(2));
+  }
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
