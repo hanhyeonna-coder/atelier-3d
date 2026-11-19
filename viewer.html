@@ -3605,7 +3605,7 @@ function stripEmbeddedBoatFromExternalEnvironment(extGLB){
 
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
-  loadGLB('./models/avatar_01.glb'),
+  loadGLB('https://raw.githubusercontent.com/hanhyeonna-coder/atelier-3d/ac69238c9ae42052ca3159e9a1461511837e151a/models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/flower_light.glb').catch(()=>null),
