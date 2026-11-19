@@ -529,12 +529,7 @@ function refreshStandingAvatarColors(){
 
 let envMixer=null;
 let boatMixer=null;
-let boatMover=null;
 let extEnvMixer=null;
-const BOAT_ANIM_SPEED=.036;
- let boatLastWorldPos=new THREE.Vector3();
-let boatFacingReady=false;
-let boatPrevPos=new THREE.Vector3();
 
 const skyClouds=[];
 const waterCloudReflections=[];
@@ -543,11 +538,6 @@ let snowPositions=null;
 let snowVelocities=null;
 const SNOW_COUNT=850;
 let snowEnabled=true;
-let boatHasPrev=false;
-let boatAngle=0;
-const BOAT_RADIUS=10.5;
-const BOAT_ANGULAR_SPEED=0.060; // ~105 sec per lap: about 10x slower than original
-const BOAT_Y=-0.75;
 
 // Pavilion controller constants.
 const WALK_RADIUS=8.05;
@@ -921,25 +911,6 @@ function enhanceMaterials(root){
   });
 }
 
-function correctBoatClip(sourceClip){
-  const clip=sourceClip.clone();
-
-  // Boat is now much larger, so keep the route well outside the pavilion
-  // and lower the hull enough that its upper geometry never clips into the floor.
-  for(const track of clip.tracks){
-    if(!track.name.endsWith('.position'))continue;
-
-    const values=track.values;
-    for(let i=0;i<values.length;i+=3){
-      values[i]   *= 2.45;
-      values[i+1] -= 1.60;
-      values[i+2] *= 2.45;
-    }
-  }
-
-  return clip;
-}
-
 function playAvatar(name,fade=.12){
   const next=avatarActions[name];
   if(!next)return;
@@ -993,90 +964,110 @@ function constrainWalkable(next,previous){
   return isWalkableWorldPosition(next)?next:previous.clone();
 }
 
+function isolateAvatarMaterials(model){
+  if(!model)return;
+  model.traverse(o=>{
+    if(!o.isMesh || !o.material)return;
+    if(Array.isArray(o.material)){
+      o.material=o.material.map(mat=>mat?.clone?.()||mat);
+    }else{
+      o.material=o.material.clone?.()||o.material;
+    }
+  });
+}
+
 function recolorBeret(model,color){
   if(!model)return;
   model.updateMatrixWorld(true);
 
   const whole=new THREE.Box3().setFromObject(model);
   const wholeSize=whole.getSize(new THREE.Vector3());
-  const topCut=whole.min.y+wholeSize.y*.72;
-
-  const explicit=[];
-  const geometric=[];
+  const topCut=whole.min.y+wholeSize.y*.68;
 
   const tokenMatch=value=>{
     const v=(value||'').toLowerCase();
     return /(^|[\s_.-])(beret|hat)([\s_.-]|$)/.test(v);
   };
-
-  const luminance=mat=>{
+  const lum=mat=>{
     if(!mat?.color)return 1;
     return (mat.color.r+mat.color.g+mat.color.b)/3;
   };
+  const parts=[];
 
-  const paint=(o,index,mat)=>{
-    const cloned=mat.clone();
-    if(cloned.color)cloned.color.copy(color.isColor?color:new THREE.Color(color));
+  model.traverse(o=>{
+    if(!o.isMesh || !o.material)return;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    const box=new THREE.Box3().setFromObject(o);
+    const size=box.getSize(new THREE.Vector3());
+    const center=box.getCenter(new THREE.Vector3());
+
+    mats.forEach((mat,index)=>{
+      if(!mat)return;
+      const explicit=tokenMatch(o.name)||tokenMatch(mat.name);
+      const dark=lum(mat)<.32;
+      if(!explicit && !(dark && center.y>=topCut))return;
+
+      const width=Math.max(size.x,size.z);
+      const flatness=width/Math.max(size.y,.001);
+      parts.push({o,index,mat,center,size,width,flatness,explicit,dark});
+    });
+  });
+
+  if(!parts.length){
+    console.warn('Beret parts not found; recolor skipped.');
+    return;
+  }
+
+  // Prefer the wide, flat beret body. Explicit naming wins when available.
+  const bodies=parts.filter(p=>p.explicit || (p.flatness>=1.35 && p.width>=wholeSize.y*.08));
+  const body=(bodies.length?bodies:parts).sort((a,b)=>{
+    if(a.explicit!==b.explicit)return Number(b.explicit)-Number(a.explicit);
+    return (b.width*b.flatness)-(a.width*a.flatness);
+  })[0];
+
+  // Include small dark pieces sitting directly above/inside the beret body (e.g. top knob),
+  // but exclude lower hair masses.
+  const bodyRadius=Math.max(body.size.x,body.size.z)*.72;
+  const targets=parts.filter(p=>{
+    if(p===body)return true;
+    if(p.explicit)return true;
+    const dx=p.center.x-body.center.x;
+    const dz=p.center.z-body.center.z;
+    const horizontal=Math.hypot(dx,dz);
+    const vertical=p.center.y-body.center.y;
+    return p.dark &&
+      horizontal<=bodyRadius &&
+      vertical>=-body.size.y*.35 &&
+      vertical<=body.size.y*2.8 &&
+      p.width<=Math.max(body.width*1.15,wholeSize.y*.16);
+  });
+
+  const unique=new Map();
+  for(const p of targets)unique.set(p.o.uuid+'|'+p.index,p);
+
+  const targetColor=color?.isColor?color:new THREE.Color(color);
+  for(const p of unique.values()){
+    const cloned=p.mat.clone();
+    if(cloned.color)cloned.color.copy(targetColor);
     if('map' in cloned)cloned.map=null;
     if('vertexColors' in cloned)cloned.vertexColors=false;
     if('roughness' in cloned)cloned.roughness=.68;
     if('metalness' in cloned)cloned.metalness=0;
     cloned.needsUpdate=true;
 
-    if(Array.isArray(o.material)){
-      const arr=o.material.slice();
-      arr[index]=cloned;
-      o.material=arr;
+    if(Array.isArray(p.o.material)){
+      const arr=p.o.material.slice();
+      arr[p.index]=cloned;
+      p.o.material=arr;
     }else{
-      o.material=cloned;
+      p.o.material=cloned;
     }
-  };
-
-  model.traverse(o=>{
-    if(!o.isMesh)return;
-    const mats=Array.isArray(o.material)?o.material:[o.material];
-
-    mats.forEach((mat,index)=>{
-      if(!mat)return;
-      if(tokenMatch(mat.name)){
-        explicit.push({o,index,mat,score:100});
-      }
-    });
-
-    const box=new THREE.Box3().setFromObject(o);
-    const size=box.getSize(new THREE.Vector3());
-    const center=box.getCenter(new THREE.Vector3());
-    if(center.y<topCut)return;
-
-    const width=Math.max(size.x,size.z);
-    const height=Math.max(size.y,.001);
-    const flatness=width/height;
-    if(width<wholeSize.y*.08 || flatness<1.55)return;
-
-    mats.forEach((mat,index)=>{
-      if(!mat || luminance(mat)>.30)return;
-      const topness=(center.y-whole.min.y)/Math.max(wholeSize.y,.001);
-      const score=topness*6 + flatness*2 + width/Math.max(wholeSize.y,.001);
-      geometric.push({o,index,mat,score});
-    });
-  });
-
-  let target=null;
-  if(explicit.length){
-    explicit.sort((a,b)=>b.score-a.score);
-    target=explicit[0];
-  }else if(geometric.length){
-    geometric.sort((a,b)=>b.score-a.score);
-    target=geometric[0];
   }
 
-  if(!target){
-    console.warn('Beret target not found; skipped recolor to protect hair.');
-    return;
-  }
-
-  paint(target.o,target.index,target.mat);
-  console.log('Beret target',target.o.name||'',target.mat.name||'',color.getHexString?.()||color);
+  console.log('Beret recolored parts', [...unique.values()].map(p=>({
+    object:p.o.name||'',
+    material:p.mat.name||''
+  })), targetColor.getHexString());
 }
 function keepOnlyFurniture(root){
   root.traverse(o=>{
@@ -1343,6 +1334,7 @@ function spawnNPCs(baseModel,clips,count=NPC_COUNT){
   for(let i=0;i<count;i++){
     const root=new THREE.Group();
     const model=SkeletonUtils.clone(baseModel);
+    isolateAvatarMaterials(model);
     root.add(model);
 
     const {mixer,actions,current}=makeNPCActionSet(model,clips);
@@ -1612,6 +1604,7 @@ function ensureRemoteAvatar(id,state={}){
     const root=new THREE.Group();
     root.userData.remoteClientId=id;
     const model=SkeletonUtils.clone(avatarModel);
+    isolateAvatarMaterials(model);
     root.add(model);
     const mixer=new THREE.AnimationMixer(model);
     const actions={};
@@ -3852,28 +3845,20 @@ Promise.all([
 
   if(boatGLB){
     enhanceMaterials(boatGLB.scene);
+    boatGLB.scene.traverse(o=>{o.visible=true;});
     scene.add(boatGLB.scene);
 
-    // Use the Blender-authored boat scale, transform and motion exactly as exported.
-    // Do not apply any web-side scale multiplier or circular route override.
-    boatMover=boatGLB.scene.getObjectByName('EXT Boat 0') || boatGLB.scene;
-    boatMover?.traverse(o=>{o.visible=true;});
-
+    // Blender is the single source of truth for boat size, position, facing, path and timing.
     if(boatGLB.animations?.length){
       boatMixer=new THREE.AnimationMixer(boatGLB.scene);
       boatGLB.animations.forEach(clip=>{
         const action=boatMixer.clipAction(clip);
         action.setLoop(THREE.LoopRepeat,Infinity);
-        action.setEffectiveTimeScale(BOAT_ANIM_SPEED);
-        action.play();
+        action.reset().play();
       });
     }else{
       boatMixer=null;
-    }
-
-    if(boatMover){
-      boatMover.getWorldPosition(boatLastWorldPos);
-      boatFacingReady=true;
+      console.warn('atelier_boat.glb has no animation clips.');
     }
   }
 
@@ -3883,6 +3868,7 @@ Promise.all([
   scene.add(avatarRoot);
 
   avatarModel=avGLB.scene;
+  isolateAvatarMaterials(avatarModel);
   enhanceMaterials(avatarModel);
   avatarRoot.add(avatarModel);
   normalizeAvatarOrigin(avatarModel);
