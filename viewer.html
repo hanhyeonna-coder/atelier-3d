@@ -338,7 +338,11 @@ function applyNamedNightLights(factor){
     if(!o.isMesh || !o.material)return;
     const n=(o.name||'').toUpperCase();
     const isFlower=n.startsWith('FLOWER_LIGHT_');
-    const isWindow=n.startsWith('HOUSE_WINDOW_');
+    // Accept both the original web naming convention and the Blender house-window names.
+    // Examples: HOUSE_WINDOW_01, EXT House 0 Window 0, EXT House 19 Window 1
+    const isWindow=
+      n.startsWith('HOUSE_WINDOW_') ||
+      /^EXT House \d+ Window [01]$/.test(name);
     if(!isFlower && !isWindow)return;
 
     const mats=Array.isArray(o.material)?o.material:[o.material];
