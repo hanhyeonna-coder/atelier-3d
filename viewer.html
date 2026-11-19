@@ -275,7 +275,10 @@ function updateRuntimeDebug(extra=''){
   const windows=Array.isArray(window.__debugNightWindows)?window.__debugNightWindows.length:0;
   const flowers=Array.isArray(window.__debugFlowerLights)?window.__debugFlowerLights.length:0;
   const stars=typeof starField!=='undefined' && starField?.children ? starField.children.length : 0;
-  runtimeDebug.textContent='DEBUG 01\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+(extra?'\n'+extra:'');
+  const wNames=(window.__debugNightWindows||[]).slice(0,2).map(o=>o.name).join(', ');
+  const fNames=(window.__debugFlowerLights||[]).slice(0,2).map(x=>x.anchor?.name||'').join(', ');
+  runtimeDebug.textContent='DEBUG 01\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+
+    (wNames?'\nW: '+wNames:'')+(fNames?'\nF: '+fNames:'')+(extra?'\n'+extra:'');
 }
 console.log('ATELIER DEBUG 01 loaded');
 
@@ -458,9 +461,8 @@ function registerNightWindows(root){
 
   root.traverse(o=>{
     if(!o.isMesh || !o.material)return;
-    const n=(o.name||'').trim();
-    const u=n.toUpperCase();
-    if(!(u.includes('EXT HOUSE') && u.includes('WINDOW')))return;
+    const n=normalizedAssetName(o.name);
+    if(!(n.includes('ext house') && n.includes('window')))return;
 
     const source=Array.isArray(o.material)?o.material:[o.material];
     o.userData.atelierDayMaterials=source.map(mat=>mat?.clone?.()||mat);
@@ -521,12 +523,12 @@ function registerFlowerNightLights(lightRoot,flowerRoot){
   }
   flowerNightLights.length=0;
 
-  let anchors=collectNamedRoots(lightRoot,o=>(o.name||'').toUpperCase().startsWith('FLOWER_LIGHT_'));
+  let anchors=collectNamedRoots(lightRoot,o=>normalizedAssetName(o.name).startsWith('flower light'));
 
   // Fallback to actual lower-flower positions if the dedicated light GLB exported lights/empties
   // without preserving the expected named mesh.
   if(!anchors.length){
-    anchors=collectNamedRoots(flowerRoot,o=>(o.name||'').toLowerCase().includes('lower flower'));
+    anchors=collectNamedRoots(flowerRoot,o=>normalizedAssetName(o.name).includes('lower flower'));
   }
 
   for(const anchor of anchors.slice(0,16)){
@@ -973,6 +975,7 @@ function enhanceMaterials(root){
       const isStructureWood =
         (
           materialName==='warm oak' ||
+          materialName==='dark oak' ||
           materialName==='ext dark wood' ||
           objectName.startsWith('column ') ||
           objectName.startsWith('roof beam ') ||
@@ -1298,22 +1301,34 @@ function recolorBeret(model,color){
 }
 function forceEaselWoodMaterials(root){
   if(!root)return;
-  root.traverse(mesh=>{
-    if(!mesh.isMesh || !mesh.material || !hasNamedAncestor(mesh,'easel'))return;
 
-    const objectName=(mesh.name||'').toLowerCase();
+  root.traverse(mesh=>{
+    if(!mesh.isMesh || !mesh.material)return;
+
+    const objectName=normalizedAssetName(mesh.name);
     const source=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+
     const fixed=source.map(mat=>{
       if(!mat)return mat;
-      const materialName=(mat.name||'').toLowerCase();
-      const isCanvasSlot=
-        materialName.includes('canvas') &&
-        !objectName.includes('clamp') &&
-        !objectName.includes('clip') &&
-        !objectName.includes('holder') &&
-        !objectName.includes('support') &&
-        !objectName.includes('top');
-      if(isCanvasSlot)return mat;
+      const materialName=normalizedAssetName(mat.name);
+
+      const forceWood=
+        materialName==='dark oak' ||
+        materialName==='warm oak' ||
+        objectName.includes('clamp') ||
+        objectName.includes('clip') ||
+        objectName.includes('holder') ||
+        objectName.includes('support') ||
+        objectName.includes('easel');
+
+      const isActualCanvas=
+        objectName.includes('canvas') ||
+        objectName.includes('painting') ||
+        objectName.includes('artwork') ||
+        (materialName.includes('canvas') && !forceWood);
+
+      if(isActualCanvas)return mat;
+      if(!forceWood)return mat;
 
       const m=mat.clone();
       if(m.color)m.color.set('#6f4228');
@@ -1326,6 +1341,7 @@ function forceEaselWoodMaterials(root){
       m.needsUpdate=true;
       return m;
     });
+
     mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
   });
 }
