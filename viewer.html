@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>좀쓰화실</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
 #app{position:fixed;inset:0}
@@ -296,6 +297,8 @@ const DAY_SKY=new THREE.Color(0xd8e6ee);
 const NIGHT_SKY=new THREE.Color(0x08111f);
 let nightFactor=0;
 let lastNightLightingUpdate=0;
+const skyClouds=[];
+const waterCloudReflections=[];
 
 function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   const pos=new Float32Array(count*3);
@@ -671,8 +674,6 @@ let envMixer=null;
 let boatMixer=null;
 let extEnvMixer=null;
 
-const skyClouds=[];
-const waterCloudReflections=[];
 let snowSystem=null;
 let snowPositions=null;
 let snowVelocities=null;
