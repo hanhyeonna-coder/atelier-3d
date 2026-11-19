@@ -10,24 +10,21 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:800;color:#4b3a30}
 #loadingMessage{transition:opacity .28s ease,transform .28s ease;text-align:center;padding:0 24px}
 #loadingMessage.swap{opacity:0;transform:translateY(5px)}
-#hud{position:fixed;left:16px;top:16px;z-index:10;padding:9px 12px;border-radius:13px;background:rgba(255,255,255,.78);backdrop-filter:blur(10px);font-size:12px;color:#42362f;box-shadow:0 8px 28px rgba(0,0,0,.09);pointer-events:none}
-#hud b{display:block;margin:0}
-#version{opacity:.34;font-size:9px;margin-top:3px}
-#topActions{position:fixed;right:18px;top:18px;z-index:12;width:158px;display:flex;flex-direction:column;gap:8px}
-#timerPanel,#historyBtn,#accountBtn{position:static;width:100%;min-height:40px;box-sizing:border-box;border:1px solid rgba(93,73,61,.08);border-radius:13px;padding:9px 12px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);color:#4b3a30;box-shadow:0 7px 22px rgba(0,0,0,.10);font-weight:800;font-size:13px}
-#timerPanel{display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
-#historyBtn,#accountBtn{cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
-#historyBtn:hover,#accountBtn:hover{background:rgba(255,255,255,.98)}
+#timerPanel{position:fixed;left:16px;top:16px;z-index:12;min-height:40px;box-sizing:border-box;border:1px solid rgba(93,73,61,.08);border-radius:13px;padding:9px 14px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);color:#4b3a30;box-shadow:0 7px 22px rgba(0,0,0,.10);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+#topActions{position:fixed;right:18px;top:18px;z-index:12;width:178px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);overflow:hidden}
+#historyBtn,#accountBtn{position:static;width:100%;min-height:42px;box-sizing:border-box;border:0;border-radius:0;padding:10px 14px;background:transparent;color:#4b3a30;font-weight:800;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease}
+#historyBtn{border-bottom:1px solid rgba(93,73,61,.10)}
+#historyBtn:hover,#accountBtn:hover{color:#b05a48;background:rgba(176,90,72,.06)}
 #controlHint{position:fixed;left:50%;bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px));transform:translate(-50%,10px);z-index:11;max-width:min(88vw,720px);color:#fff;font-size:13px;font-weight:750;text-align:center;line-height:1.4;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.72);opacity:0;transition:opacity .5s ease,transform .5s ease;pointer-events:none;white-space:normal}
 #controlHint.show{opacity:1;transform:translate(-50%,0)}
+#centerHint{position:fixed;left:50%;top:50%;transform:translate(-50%,-42%);z-index:11;color:#fff;font-size:16px;font-weight:850;text-align:center;text-shadow:0 2px 5px rgba(0,0,0,.9),0 0 12px rgba(0,0,0,.72);opacity:0;transition:opacity .45s ease,transform .45s ease;pointer-events:none;max-width:82vw}
+#centerHint.show{opacity:1;transform:translate(-50%,-50%)}
 @media (max-width:640px){
-  #hud{left:10px;top:10px;padding:8px 10px;max-width:calc(100vw - 164px)}
-  #hud b{font-size:13px}
-  #version{font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px}
-  #topActions{right:10px;top:10px;width:138px;gap:6px}
-  #timerPanel,#historyBtn,#accountBtn{min-height:36px;padding:8px 9px;border-radius:12px;font-size:12px}
-  #accountBtn{gap:4px}
+  #timerPanel{left:10px;top:10px;min-height:36px;padding:8px 10px;font-size:12px;max-width:calc(100vw - 164px)}
+  #topActions{right:10px;top:10px;width:144px}
+  #historyBtn,#accountBtn{min-height:38px;padding:8px 10px;font-size:12px}
   #controlHint{bottom:max(30px,calc(env(safe-area-inset-bottom) + 18px));font-size:12px;max-width:86vw}
+  #centerHint{font-size:14px}
 }
 #accountModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(30,24,20,.48);z-index:35;padding:20px;box-sizing:border-box}
 #accountModal.show{display:flex}
@@ -92,16 +89,13 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <body>
 <div id="app"></div>
 <div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
-<div id="hud">
-  <b>Atelier</b>
-  <div id="version">controller v9.5 · responsive HUD + rotating loading copy</div>
-</div>
+<div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <div id="topActions">
-  <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
-  <button id="historyBtn">진행 기록</button>
-  <button id="accountBtn">👤 로그인</button>
+  <button id="historyBtn">내 그림 진행 기록</button>
+  <button id="accountBtn">내 계정</button>
 </div>
 <div id="controlHint"></div>
+<div id="centerHint"></div>
 <div id="statusToast"></div>
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
@@ -164,6 +158,7 @@ import {createClient} from '@supabase/supabase-js';
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
 const controlHint=document.getElementById('controlHint');
+const centerHint=document.getElementById('centerHint');
 const status=document.getElementById('statusToast');
 const workTimer=document.getElementById('workTimer');
 const artUpload=document.getElementById('artUpload');
@@ -201,8 +196,8 @@ function applyLocaleUI(){
     '클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동',
     'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
   );
-  historyBtn.textContent=t('진행 기록','Progress');
-  accountBtn.textContent=t('👤 로그인','👤 Log in');
+  historyBtn.textContent=t('내 그림 진행 기록','My Art Progress');
+  accountBtn.textContent=t('내 계정','My Account');
   accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
   accountDesc.textContent=t(
     '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
@@ -241,7 +236,13 @@ const loadingCopyTimer=setInterval(()=>{
 },1650);
 
 setTimeout(()=>controlHint.classList.add('show'),700);
-setTimeout(()=>controlHint.classList.remove('show'),7200);
+setTimeout(()=>controlHint.classList.remove('show'),6200);
+setTimeout(()=>{
+  if(playerSeat)return;
+  centerHint.textContent=t('빈 이젤을 클릭해 앉아보세요','Click an empty easel to sit down');
+  centerHint.classList.add('show');
+},6900);
+setTimeout(()=>centerHint.classList.remove('show'),10200);
 let statusHideTimer=null;
 function showStatus(message,ms=2200){
   status.textContent=message;
@@ -456,6 +457,8 @@ let currentWorkElapsedSeconds=0;
 let workSaveAccumulator=0;
 let dailyWorkSyncAccumulator=0;
 const STORAGE_KEY='atelier3d_progress_v1';
+const TIMER_DATA_VERSION=2;
+const TIMER_V2_CUTOFF_MS=Date.parse('2026-11-19T06:30:00Z');
 let savedArtworkDataUrl=null;
 let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
@@ -1823,12 +1826,12 @@ async function adoptGuestDataIntoAccount(user){
 
   const {data:daily}=await supabase
     .from('atelier_daily_work')
-    .select('work_seconds')
+    .select('work_seconds,updated_at')
     .eq('owner_id',ownerId)
     .eq('work_date',localDateKey())
     .maybeSingle();
 
-  if(daily?.work_seconds!=null){
+  if(daily?.work_seconds!=null && new Date(daily.updated_at||0).getTime()>=TIMER_V2_CUTOFF_MS){
     workElapsedSeconds=Math.max(workElapsedSeconds,Number(daily.work_seconds)||0);
     saveProgress();
   }
@@ -1839,7 +1842,7 @@ async function adoptGuestDataIntoAccount(user){
   await fetchServerState();
 
   if(avatarRoot)setAvatarNameLabel(avatarRoot,displayName);
-  accountBtn.textContent=t('👤 내 계정','👤 Account');
+  accountBtn.textContent=t('내 계정','My Account');
   accountEmail.style.display='none';
   accountAction.style.display='none';
   logoutBtn.style.display='block';
@@ -1851,7 +1854,7 @@ function resetToGuestIdentity(){
   ownerId=clientId;
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  accountBtn.textContent=t('👤 로그인','👤 Log in');
+  accountBtn.textContent=t('내 계정','My Account');
   accountEmail.style.display='block';
   accountAction.style.display='block';
   logoutBtn.style.display='none';
@@ -2447,7 +2450,7 @@ function loadProgress(){
     const data=JSON.parse(raw);
 
     totalWorkElapsedSeconds=Math.max(0,Number(data.totalSeconds)||0);
-    workElapsedSeconds=(data.date===localDateKey())
+    workElapsedSeconds=(data.timerVersion===TIMER_DATA_VERSION && data.date===localDateKey())
       ? Math.max(0,Number(data.todaySeconds)||0)
       : 0;
     currentWorkElapsedSeconds=Math.max(0,Number(data.currentWorkSeconds)||0);
@@ -2463,6 +2466,7 @@ function loadProgress(){
 function saveProgress(){
   try{
     localStorage.setItem(STORAGE_KEY,JSON.stringify({
+      timerVersion:TIMER_DATA_VERSION,
       date:localDateKey(),
       todaySeconds:workElapsedSeconds,
       totalSeconds:totalWorkElapsedSeconds,
@@ -3429,7 +3433,7 @@ function updateWorkTimer(dt){
   const timeText=formatTodayWork(workElapsedSeconds);
   workTimer.textContent=playerSeat
     ? t(`그림 그리는 중 · 오늘 ${timeText}`,`Painting · today ${timeText}`)
-    : t(`오늘 ${timeText} 그림 그렸어요`,`Today: ${timeText} painting`);
+    : t(`오늘 ${timeText} 그림 그렸어요`,`Today · ${timeText} painting`);
 }
 
 function updateMovement(dt){
