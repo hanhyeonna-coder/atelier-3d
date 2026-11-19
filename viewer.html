@@ -342,7 +342,7 @@ function applyNamedNightLights(factor){
     // Examples: HOUSE_WINDOW_01, EXT House 0 Window 0, EXT House 19 Window 1
     const isWindow=
       n.startsWith('HOUSE_WINDOW_') ||
-      /^EXT House \d+ Window [01]$/.test(name);
+      /^EXT HOUSE \d+ WINDOW [01]$/.test(n);
     if(!isFlower && !isWindow)return;
 
     const mats=Array.isArray(o.material)?o.material:[o.material];
@@ -3605,7 +3605,7 @@ function stripEmbeddedBoatFromExternalEnvironment(extGLB){
 
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
-  loadGLB('https://raw.githubusercontent.com/hanhyeonna-coder/atelier-3d/ac69238c9ae42052ca3159e9a1461511837e151a/models/avatar_01.glb'),
+  loadGLB('./models/avatar_01.glb'),
   loadGLB('./models/atelier_furniture.glb').catch(()=>null),
   loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
   loadGLB('./models/flower_light.glb').catch(()=>null),
