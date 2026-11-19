@@ -503,12 +503,28 @@ function hatColorForSeatIndex(index){
 }
 
 function standingHatColorForClient(id){
-  const hue=(hashString(id)%360)/360;
-  return new THREE.Color().setHSL(hue,.68,.52);
+  const index=Math.abs(hashString(id))%hatColorPool.length;
+  return new THREE.Color(hatColorPool[index]);
+}
+
+function liveStandingColorForClient(id){
+  const ids=[clientId,...remoteAvatars.keys()].filter(Boolean).sort();
+  const index=Math.max(0,ids.indexOf(id));
+  return new THREE.Color(hatColorPool[index%hatColorPool.length]);
 }
 
 function standingPlayerHatColor(){
-  return standingHatColorForClient(clientId);
+  return liveStandingColorForClient(clientId);
+}
+
+function refreshStandingAvatarColors(){
+  if(avatarModel && !playerSeat && !pendingPlayerSeat){
+    recolorBeret(avatarModel,liveStandingColorForClient(clientId));
+  }
+  for(const [id,entry] of remoteAvatars){
+    if(Number.isFinite(entry.seatIndex))continue;
+    recolorBeret(entry.model,liveStandingColorForClient(id));
+  }
 }
 
 let envMixer=null;
@@ -983,23 +999,27 @@ function recolorBeret(model,color){
 
   const whole=new THREE.Box3().setFromObject(model);
   const wholeSize=whole.getSize(new THREE.Vector3());
-  const topThreshold=whole.min.y+wholeSize.y*.70;
+  const topCut=whole.min.y+wholeSize.y*.72;
 
-  const namedSlots=[];
-  const fallbackSlots=[];
+  const explicit=[];
+  const geometric=[];
 
   const tokenMatch=value=>{
     const v=(value||'').toLowerCase();
     return /(^|[\s_.-])(beret|hat)([\s_.-]|$)/.test(v);
   };
 
-  const paintSlot=(o,index,mat)=>{
+  const luminance=mat=>{
+    if(!mat?.color)return 1;
+    return (mat.color.r+mat.color.g+mat.color.b)/3;
+  };
+
+  const paint=(o,index,mat)=>{
     const cloned=mat.clone();
-    if(cloned.color)cloned.color.setHex(color);
-    // Player berets use a clean flat color. Remove multipliers that can keep it black.
+    if(cloned.color)cloned.color.copy(color.isColor?color:new THREE.Color(color));
     if('map' in cloned)cloned.map=null;
     if('vertexColors' in cloned)cloned.vertexColors=false;
-    if('roughness' in cloned)cloned.roughness=.72;
+    if('roughness' in cloned)cloned.roughness=.68;
     if('metalness' in cloned)cloned.metalness=0;
     cloned.needsUpdate=true;
 
@@ -1014,68 +1034,49 @@ function recolorBeret(model,color){
 
   model.traverse(o=>{
     if(!o.isMesh)return;
-
     const mats=Array.isArray(o.material)?o.material:[o.material];
-    const objectNamed=tokenMatch(o.name);
+
+    mats.forEach((mat,index)=>{
+      if(!mat)return;
+      if(tokenMatch(mat.name)){
+        explicit.push({o,index,mat,score:100});
+      }
+    });
 
     const box=new THREE.Box3().setFromObject(o);
     const size=box.getSize(new THREE.Vector3());
     const center=box.getCenter(new THREE.Vector3());
-    const inHeadZone=center.y>=topThreshold;
-    const flatEnough=size.y<=wholeSize.y*.20;
-    const wideEnough=Math.max(size.x,size.z)>=wholeSize.y*.07;
+    if(center.y<topCut)return;
+
+    const width=Math.max(size.x,size.z);
+    const height=Math.max(size.y,.001);
+    const flatness=width/height;
+    if(width<wholeSize.y*.08 || flatness<1.55)return;
 
     mats.forEach((mat,index)=>{
-      if(!mat)return;
-      const materialNamed=tokenMatch(mat.name);
-
-      // Strongest signal: the material slot itself is named for the beret/hat.
-      if(materialNamed){
-        namedSlots.push({o,index,mat,priority:2});
-        return;
-      }
-
-      // If only the mesh is named, choose just its darkest material slot later.
-      // This avoids recoloring hair when hair + beret share one mesh.
-      if(objectNamed){
-        const lum=mat.color ? (mat.color.r+mat.color.g+mat.color.b)/3 : 1;
-        namedSlots.push({o,index,mat,priority:1,lum});
-        return;
-      }
-
-      // Last-resort spatial fallback: only upper-head, flat/wide, dark material slots.
-      if(inHeadZone && flatEnough && wideEnough){
-        const lum=mat.color ? (mat.color.r+mat.color.g+mat.color.b)/3 : 1;
-        if(lum<.28)fallbackSlots.push({o,index,mat,lum,centerY:center.y});
-      }
+      if(!mat || luminance(mat)>.30)return;
+      const topness=(center.y-whole.min.y)/Math.max(wholeSize.y,.001);
+      const score=topness*6 + flatness*2 + width/Math.max(wholeSize.y,.001);
+      geometric.push({o,index,mat,score});
     });
   });
 
-  let targets=[];
-  const explicitMaterials=namedSlots.filter(x=>x.priority===2);
-  if(explicitMaterials.length){
-    targets=explicitMaterials;
-  }else{
-    const namedMeshes=namedSlots.filter(x=>x.priority===1);
-    if(namedMeshes.length){
-      // Pick only the darkest slot among hat-named meshes.
-      namedMeshes.sort((a,b)=>(a.lum??1)-(b.lum??1));
-      targets=[namedMeshes[0]];
-    }else if(fallbackSlots.length){
-      // Pick one darkest/highest slot only; never recolor multiple head materials.
-      fallbackSlots.sort((a,b)=>(a.lum-b.lum) || (b.centerY-a.centerY));
-      targets=[fallbackSlots[0]];
-    }
+  let target=null;
+  if(explicit.length){
+    explicit.sort((a,b)=>b.score-a.score);
+    target=explicit[0];
+  }else if(geometric.length){
+    geometric.sort((a,b)=>b.score-a.score);
+    target=geometric[0];
   }
 
-  targets.forEach(x=>paintSlot(x.o,x.index,x.mat));
-
-  if(targets.length){
-    const debug=targets.map(x=>({object:x.o.name||'',material:x.mat.name||''}));
-    console.log('Beret recolor target',debug,'color',color);
-  }else{
-    console.warn('Beret material not found; no hair/material fallback was modified.');
+  if(!target){
+    console.warn('Beret target not found; skipped recolor to protect hair.');
+    return;
   }
+
+  paint(target.o,target.index,target.mat);
+  console.log('Beret target',target.o.name||'',target.mat.name||'',color.getHexString?.()||color);
 }
 function keepOnlyFurniture(root){
   root.traverse(o=>{
@@ -1616,16 +1617,18 @@ function ensureRemoteAvatar(id,state={}){
     const actions={};
     window.__atelierAvatarClips?.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
     scene.add(root);
-    entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0,displayName:state.displayName||null,lastGreetingAt:0};
+    entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0,displayName:state.displayName||null,lastGreetingAt:0,seatIndex:null};
     setAvatarNameLabel(root,state.displayName||'이름 없는 화가');
     const initialLabel=root.getObjectByName('Player Name Label');
     if(initialLabel)initialLabel.visible=false;
     remoteAvatars.set(id,entry);
+    refreshStandingAvatarColors();
   }
-  if(Number.isFinite(state.seatIndex)){
-    recolorBeret(entry.model,hatColorForSeatIndex(state.seatIndex));
+  entry.seatIndex=Number.isFinite(state.seatIndex)?state.seatIndex:null;
+  if(Number.isFinite(entry.seatIndex)){
+    recolorBeret(entry.model,hatColorForSeatIndex(entry.seatIndex));
   }else{
-    recolorBeret(entry.model,standingHatColorForClient(id));
+    refreshStandingAvatarColors();
   }
   if(state.displayName){
     entry.displayName=state.displayName;
@@ -1672,7 +1675,7 @@ function applyPresenceRows(rows){
     if(row.state==='working'){
       playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
     }else{
-      if(!Number.isFinite(row.seat_index))recolorBeret(entry.model,standingHatColorForClient(row.client_id));
+      if(!Number.isFinite(row.seat_index))entry.seatIndex=null; refreshStandingAvatarColors();
       if(row.state==='walking')playRemote(entry,'Avatar_Walk');
       else playRemote(entry,'Avatar_Idle');
     }
@@ -1700,6 +1703,7 @@ async function fetchPresenceOnly(){
     if(!freshIds.has(id) && !seated){
       disposeRemoteAvatar(entry);
       remoteMotion.delete(id);
+      refreshStandingAvatarColors();
     }
   }
 
@@ -1746,7 +1750,7 @@ function handleRemoteMotion(message){
   if(p.state==='working'){
     playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
   }else{
-    if(!Number.isFinite(p.seatIndex))recolorBeret(entry.model,standingHatColorForClient(p.clientId));
+    if(!Number.isFinite(p.seatIndex))entry.seatIndex=null; refreshStandingAvatarColors();
     if(p.state==='walking')playRemote(entry,'Avatar_Walk');
     else playRemote(entry,'Avatar_Idle');
   }
@@ -2715,7 +2719,11 @@ function releasePlayerSeat(){
   if(pendingPlayerSeat?.occupiedBy==='player')pendingPlayerSeat.occupiedBy=null;
   playerSeat=null;
   pendingPlayerSeat=null;
-  if(avatarModel)recolorBeret(avatarModel,standingPlayerHatColor());
+  if(avatarModel){
+    recolorBeret(avatarModel,standingPlayerHatColor());
+  refreshStandingAvatarColors();
+    refreshStandingAvatarColors();
+  }
 }
 
 function isCanvasMesh(o){
