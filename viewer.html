@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Atelier 3D</title>
+<title>좀쓰화실</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
 #app{position:fixed;inset:0}
@@ -1397,64 +1397,65 @@ function syncRemoteAvatars(){
   }
 }
 
-function clearServerArtworkVisuals(){
+function removeArtworkOverlayVisual(seat){
+  const canvases=getCanvasMeshesForSeat(seat);
+  canvases.forEach(mesh=>{
+    const old=mesh.getObjectByName('Artwork Overlay');
+    if(old){
+      old.geometry?.dispose?.();
+      old.material?.map?.dispose?.();
+      old.material?.dispose?.();
+      mesh.remove(old);
+    }
+  });
+}
+
+function applyServerArtworks(rows){
+  const bySeat=new Map(rows.map(r=>[r.seat_index,r]));
+
   for(const seat of seatSlots){
+    const row=bySeat.get(seat.index);
     const isLocalCurrentArtwork=
       seat===playerArtworkSeat ||
       (savedArtworkSeatIndex===seat.index && !!savedArtworkDataUrl);
 
-    if(isLocalCurrentArtwork)continue;
-
-    if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId){
-      const canvases=getCanvasMeshesForSeat(seat);
-      canvases.forEach(mesh=>{
-        const old=mesh.getObjectByName('Artwork Overlay');
-        if(old){
-          old.geometry?.dispose?.();
-          old.material?.map?.dispose?.();
-          old.material?.dispose?.();
-          mesh.remove(old);
-        }
-      });
-      seat.serverArtworkOwner=null;
-      seat.userData=seat.userData||{};
-      delete seat.userData.artworkDataUrl;
-      delete seat.userData.artworkMeta;
-      delete seat.userData.workId;
-    }
-  }
-}
-
-function applyServerArtworks(rows){
-  clearServerArtworkVisuals();
-
-  const bySeat=new Map(rows.map(r=>[r.seat_index,r]));
-  for(const seat of seatSlots){
-    const row=bySeat.get(seat.index);
-    seat.serverArtworkOwner=row?.owner_id||null;
     seat.artworkLockedUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
-    if(!seat.userData)seat.userData={};
+    seat.userData=seat.userData||{};
+
     if(!row){
-      const isLocalCurrentArtwork=
-        seat===playerArtworkSeat ||
-        (savedArtworkSeatIndex===seat.index && !!savedArtworkDataUrl);
       if(!isLocalCurrentArtwork){
+        removeArtworkOverlayVisual(seat);
+        seat.serverArtworkOwner=null;
         delete seat.userData.artworkDataUrl;
         delete seat.userData.artworkMeta;
         delete seat.userData.workId;
       }
+      continue;
     }
-  }
 
-  for(const row of rows){
-    const seat=seatSlots.find(s=>s.index===row.seat_index);
-    if(!seat)continue;
+    const sameRemoteArtwork=
+      row.owner_id!==ownerId &&
+      seat.serverArtworkOwner===row.owner_id &&
+      seat.userData.artworkDataUrl===row.image_url &&
+      getCanvasMeshesForSeat(seat).some(mesh=>!!mesh.getObjectByName('Artwork Overlay'));
+
+    seat.serverArtworkOwner=row.owner_id||null;
 
     if(row.owner_id===ownerId)continue;
 
-    seat.userData.artworkDataUrl=row.image_url;
     seat.userData.artworkMeta=(row.display_name||'Painter')+' · '+t('작업 ','work ')+Math.max(1,Math.round((row.work_seconds||0)/60))+t('분',' min');
     seat.userData.workId=row.work_id||null;
+
+    // Keep an unchanged remote artwork on the canvas through seat claim/release refreshes.
+    // This prevents a visitor who only sits down from making the displayed artwork vanish.
+    if(sameRemoteArtwork){
+      seat.userData.artworkDataUrl=row.image_url;
+      continue;
+    }
+
+    removeArtworkOverlayVisual(seat);
+    seat.userData.artworkDataUrl=row.image_url;
+
     const img=new Image();
     img.crossOrigin='anonymous';
     img.onload=()=>getCanvasMeshesForSeat(seat).forEach(mesh=>makeArtworkOverlay(mesh,img,seat));
@@ -2306,6 +2307,7 @@ async function serverReleaseSeat(seat){
     client_id:clientId,seat_index:null,state:'idle',work_seconds:Math.floor(workElapsedSeconds),
     display_name:displayName,last_seen:new Date().toISOString()
   });
+  await fetchServerState();
 }
 
 async function serverHeartbeat(){
