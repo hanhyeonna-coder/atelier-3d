@@ -10,19 +10,21 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#efe8df;z-index:20;font-weight:800;color:#4b3a30}
 #loadingMessage{transition:opacity .28s ease,transform .28s ease;text-align:center;padding:0 24px}
 #loadingMessage.swap{opacity:0;transform:translateY(5px)}
-#timerPanel{position:fixed;left:16px;top:16px;z-index:12;min-height:40px;box-sizing:border-box;border:1px solid rgba(93,73,61,.08);border-radius:13px;padding:9px 14px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);color:#4b3a30;box-shadow:0 7px 22px rgba(0,0,0,.10);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
-#topActions{position:fixed;right:18px;top:18px;z-index:12;width:320px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);overflow:hidden;display:flex}
-#historyBtn,#accountBtn{position:static;flex:1 1 0;min-width:0;min-height:42px;box-sizing:border-box;border:0;border-radius:0;padding:10px 12px;background:transparent;color:#4b3a30;font-weight:800;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease;white-space:nowrap}
-#historyBtn{border-right:1px solid rgba(93,73,61,.10)}
-#historyBtn:hover,#accountBtn:hover{color:#b05a48;background:rgba(176,90,72,.06)}
+#timerPanel{position:fixed;left:16px;top:18px;z-index:12;padding:0;color:#fff;font-weight:850;font-size:13px;text-align:left;pointer-events:none;text-shadow:0 2px 4px rgba(0,0,0,.88),0 0 10px rgba(0,0,0,.62)}
+#topActions{position:fixed;right:18px;top:18px;z-index:12;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);padding:4px 5px}
+#historyBtn,#accountBtn{position:static;box-sizing:border-box;border:0;border-radius:10px;background:transparent;color:#4b3a30;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease;white-space:nowrap}
+#historyBtn{min-height:34px;padding:7px 10px;font-size:13px}
+#accountBtn{width:34px;height:34px;padding:0;font-size:11px;font-weight:900;letter-spacing:-.2px}
+#historyBtn:hover,#accountBtn:hover{color:#b05a48;background:rgba(176,90,72,.07)}
 #controlHint{position:fixed;left:50%;bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px));transform:translate(-50%,10px);z-index:11;max-width:min(88vw,720px);color:#fff;font-size:13px;font-weight:750;text-align:center;line-height:1.4;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.72);opacity:0;transition:opacity .5s ease,transform .5s ease;pointer-events:none;white-space:normal}
 #controlHint.show{opacity:1;transform:translate(-50%,0)}
 #centerHint{position:fixed;left:50%;top:50%;transform:translate(-50%,-42%);z-index:11;color:#fff;font-size:16px;font-weight:850;text-align:center;text-shadow:0 2px 5px rgba(0,0,0,.9),0 0 12px rgba(0,0,0,.72);opacity:0;transition:opacity .45s ease,transform .45s ease;pointer-events:none;max-width:82vw}
 #centerHint.show{opacity:1;transform:translate(-50%,-50%)}
 @media (max-width:640px){
-  #timerPanel{left:10px;right:10px;top:10px;min-height:36px;padding:8px 10px;font-size:12px;max-width:none}
-  #topActions{left:10px;right:10px;top:54px;width:auto}
-  #historyBtn,#accountBtn{min-height:38px;padding:8px 8px;font-size:11.5px}
+  #timerPanel{left:10px;top:12px;right:auto;font-size:12px;max-width:45vw}
+  #topActions{right:10px;top:8px;left:auto}
+  #historyBtn{min-height:32px;padding:6px 8px;font-size:11px}
+  #accountBtn{width:32px;height:32px;font-size:10px}
   #controlHint{bottom:max(30px,calc(env(safe-area-inset-bottom) + 18px));font-size:12px;max-width:86vw}
   #centerHint{font-size:14px}
 }
@@ -197,7 +199,7 @@ function applyLocaleUI(){
     'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
   );
   historyBtn.textContent=t('내 그림 진행 기록','My Art Progress');
-  accountBtn.textContent=t('내 계정','My Account');
+  accountBtn.textContent='MY';
   accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
   accountDesc.textContent=t(
     '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
@@ -938,7 +940,6 @@ function playAvatar(name,fade=.12){
 
   if(currentAction)currentAction.crossFadeTo(next,fade,false);
   currentAction=next;
-  showStatus(name);
 }
 
 function setAvatarFacing(dir){
@@ -977,6 +978,30 @@ function constrainWalkable(next,previous){
 }
 
 function recolorBeret(model,color){
+  if(!model)return;
+  model.updateMatrixWorld(true);
+  const whole=new THREE.Box3().setFromObject(model);
+  const wholeSize=whole.getSize(new THREE.Vector3());
+  const topThreshold=whole.min.y+wholeSize.y*.72;
+  const fallback=[];
+
+  function paintMaterial(o,index,mat){
+    const cloned=mat.clone();
+    if(cloned.color)cloned.color.setHex(color);
+    if(cloned.map)cloned.map=null;
+    if('roughness' in cloned)cloned.roughness=.72;
+    if('metalness' in cloned)cloned.metalness=0;
+    cloned.needsUpdate=true;
+    if(Array.isArray(o.material)){
+      const arr=o.material.slice();
+      arr[index]=cloned;
+      o.material=arr;
+    }else{
+      o.material=cloned;
+    }
+  }
+
+  let namedHits=0;
   model.traverse(o=>{
     if(!o.isMesh)return;
     const on=(o.name||'').toLowerCase();
@@ -985,26 +1010,34 @@ function recolorBeret(model,color){
     mats.forEach((mat,index)=>{
       if(!mat)return;
       const mn=(mat.name||'').toLowerCase();
-      if(!(on.includes('beret')||on.includes('hat')||mn.includes('beret')||mn.includes('hat')))return;
-
-      const cloned=mat.clone();
-      if(cloned.color)cloned.color.setHex(color);
-      // A black base-color texture multiplies any tint back to black.
-      // Berets are intentionally flat-colored per player, so remove that map here.
-      if(cloned.map)cloned.map=null;
-      if('roughness' in cloned)cloned.roughness=.72;
-      if('metalness' in cloned)cloned.metalness=0;
-      cloned.needsUpdate=true;
-
-      if(Array.isArray(o.material)){
-        const arr=o.material.slice();
-        arr[index]=cloned;
-        o.material=arr;
-      }else{
-        o.material=cloned;
+      if(on.includes('beret')||on.includes('hat')||on.includes('cap')||
+         mn.includes('beret')||mn.includes('hat')||mn.includes('cap')){
+        paintMaterial(o,index,mat);
+        namedHits++;
       }
     });
+
+    if(namedHits)return;
+    const box=new THREE.Box3().setFromObject(o);
+    const size=box.getSize(new THREE.Vector3());
+    const center=box.getCenter(new THREE.Vector3());
+    const mats2=Array.isArray(o.material)?o.material:[o.material];
+    const dark=mats2.some(mat=>{
+      if(!mat?.color)return false;
+      const c=mat.color;
+      return (c.r+c.g+c.b)/3<.20;
+    });
+    if(dark && center.y>=topThreshold && size.y<=wholeSize.y*.18 && Math.max(size.x,size.z)>=wholeSize.y*.08){
+      fallback.push({o,score:center.y-size.y*.35});
+    }
   });
+
+  if(namedHits===0 && fallback.length){
+    fallback.sort((a,b)=>b.score-a.score);
+    const o=fallback[0].o;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    mats.forEach((mat,index)=>{if(mat)paintMaterial(o,index,mat);});
+  }
 }
 
 function keepOnlyFurniture(root){
@@ -1565,6 +1598,7 @@ function ensureRemoteAvatar(id,state={}){
 }
 
 function playRemote(entry,name){
+  if(name!=='Avatar_Greet' && (entry?.greetingUntil||0)>performance.now())return;
   const next=entry?.actions?.[name];
   if(!next || entry.current===next)return;
   next.reset().play();
@@ -1703,47 +1737,68 @@ function broadcastMotion(force=false){
 
 const GREET_DISTANCE=1.55;
 const GREET_COOLDOWN_MS=18000;
-const GREET_DISPLAY_MS=2200;
+const GREET_DURATION_MS=1600;
+let localGreetingUntil=0;
+const greetingPairCooldown=new Map();
 
-function maybeTriggerNearbyGreeting(entry,distance){
-  if(distance>GREET_DISTANCE || playerSeat)return;
-  const now=performance.now();
-  if(now-(entry.lastGreetingAt||0)<GREET_COOLDOWN_MS)return;
-
-  entry.lastGreetingAt=now;
-  const base=entry.root.getObjectByName('Player Name Label')?.userData?.labelText || t('이름 없는 화가','Unnamed artist');
-
-  // Briefly face each other before greeting.
-  const dx=entry.root.position.x-avatarRoot.position.x;
-  const dz=entry.root.position.z-avatarRoot.position.z;
-  if(Math.hypot(dx,dz)>.001){
-    avatarRoot.rotation.y=Math.atan2(dx,dz)+MODEL_YAW_CORRECTION;
-    entry.root.rotation.y=Math.atan2(-dx,-dz)+MODEL_YAW_CORRECTION;
-  }
-
-  const greetAction=entry.actions?.['Avatar_Greet'];
-  if(greetAction){
-    playRemote(entry,'Avatar_Greet');
-    setTimeout(()=>{
-      if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
-    },1600);
-  }
-
-  if(avatarActions?.['Avatar_Greet']){
-    playAvatar('Avatar_Greet',.08);
-    setTimeout(()=>{
-      if(!playerSeat)playAvatar('Avatar_Idle',.10);
-    },1600);
-  }
-
-  setAvatarNameLabel(entry.root,t('👋 반가워요!','👋 Hi!'));
-  const label=entry.root.getObjectByName('Player Name Label');
-  if(label)label.visible=true;
+function playSynchronizedGreeting(entry,startAtMs){
+  if(!entry || !avatarRoot || playerSeat)return;
+  const delay=Math.max(0,startAtMs-Date.now());
 
   setTimeout(()=>{
-    if(!remoteAvatars.has(entry.clientId))return;
-    setAvatarNameLabel(entry.root,entry.displayName||base);
-  },GREET_DISPLAY_MS);
+    if(!remoteAvatars.has(entry.clientId) || playerSeat)return;
+
+    const dx=entry.root.position.x-avatarRoot.position.x;
+    const dz=entry.root.position.z-avatarRoot.position.z;
+    if(Math.hypot(dx,dz)>GREET_DISTANCE+.45)return;
+
+    avatarRoot.rotation.y=Math.atan2(dx,dz)+MODEL_YAW_CORRECTION;
+    entry.root.rotation.y=Math.atan2(-dx,-dz)+MODEL_YAW_CORRECTION;
+
+    localGreetingUntil=performance.now()+GREET_DURATION_MS;
+    entry.greetingUntil=performance.now()+GREET_DURATION_MS;
+
+    if(avatarActions?.['Avatar_Greet'])playAvatar('Avatar_Greet',.08);
+    if(entry.actions?.['Avatar_Greet'])playRemote(entry,'Avatar_Greet');
+
+    setTimeout(()=>{
+      if(!playerSeat)playAvatar('Avatar_Idle',.10);
+      if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
+    },GREET_DURATION_MS);
+  },delay);
+}
+
+function handleGreetingBroadcast(message){
+  const p=message?.payload;
+  if(!p || !p.from || !p.to || !Number.isFinite(p.startAt))return;
+  if(clientId!==p.from && clientId!==p.to)return;
+  const otherId=clientId===p.from?p.to:p.from;
+  const entry=remoteAvatars.get(otherId);
+  if(!entry)return;
+  playSynchronizedGreeting(entry,p.startAt);
+}
+
+function maybeTriggerNearbyGreeting(entry,distance){
+  if(distance>GREET_DISTANCE || playerSeat || !entry?.clientId)return;
+
+  const pair=[clientId,entry.clientId].sort().join('|');
+  const now=Date.now();
+  if(now-(greetingPairCooldown.get(pair)||0)<GREET_COOLDOWN_MS)return;
+
+  // Only one side initiates, preventing duplicate greeting events.
+  if(clientId!==[clientId,entry.clientId].sort()[0])return;
+
+  greetingPairCooldown.set(pair,now);
+  entry.lastGreetingAt=performance.now();
+
+  const startAt=Date.now()+350;
+  playSynchronizedGreeting(entry,startAt);
+
+  realtimeChannel?.send({
+    type:'broadcast',
+    event:'greeting',
+    payload:{from:clientId,to:entry.clientId,startAt}
+  });
 }
 
 function updateProximityNameLabels(){
@@ -1808,6 +1863,7 @@ function startRealtimeSync(){
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_presence'},handlePresenceChange)
     .on('postgres_changes',{event:'*',schema:'public',table:'atelier_likes'},()=>{ if(artModal.classList.contains('show'))refreshPreviewLikeState(); })
     .on('broadcast',{event:'motion'},handleRemoteMotion)
+    .on('broadcast',{event:'greeting'},handleGreetingBroadcast)
     .subscribe(status=>{
       if(status==='SUBSCRIBED')broadcastMotion(true);
     });
@@ -1858,7 +1914,7 @@ async function adoptGuestDataIntoAccount(user){
   await fetchServerState();
 
   if(avatarRoot)setAvatarNameLabel(avatarRoot,displayName);
-  accountBtn.textContent=t('내 계정','My Account');
+  accountBtn.textContent='MY';
   accountEmail.style.display='none';
   accountAction.style.display='none';
   logoutBtn.style.display='block';
@@ -1870,7 +1926,7 @@ function resetToGuestIdentity(){
   ownerId=clientId;
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  accountBtn.textContent=t('내 계정','My Account');
+  accountBtn.textContent='MY';
   accountEmail.style.display='block';
   accountAction.style.display='block';
   logoutBtn.style.display='none';
@@ -3455,6 +3511,10 @@ function updateWorkTimer(dt){
 
 function updateMovement(dt){
   if(!avatarRoot)return;
+  if(localGreetingUntil>performance.now()){
+    broadcastMotion();
+    return;
+  }
 
   const f=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0);
   const s=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
