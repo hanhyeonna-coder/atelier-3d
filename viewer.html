@@ -306,50 +306,63 @@ function makeClusteredStarLayer(count,size,color,clusterBias=.72){
     {a:.35,y:18},{a:1.15,y:24},{a:2.05,y:15},{a:2.9,y:26},
     {a:3.85,y:20},{a:4.65,y:28},{a:5.35,y:16},{a:5.9,y:23}
   ];
-
   for(let i=0;i<count;i++){
-    let a,y;
+    let ang,y;
     if(Math.random()<clusterBias){
       const c=clusters[Math.floor(Math.random()*clusters.length)];
-      a=c.a+(Math.random()-.5)*.42;
-      y=c.y+(Math.random()-.5)*5.5;
+      ang=c.a+(Math.random()-.5)*.48;
+      y=c.y+(Math.random()-.5)*6.2;
     }else{
-      a=Math.random()*Math.PI*2;
-      y=11+Math.random()*18;
+      ang=Math.random()*Math.PI*2;
+      y=10+Math.random()*20;
     }
-    const r=25+Math.random()*18;
-    pos[i*3]=Math.cos(a)*r;
+    const r=24+Math.random()*20;
+    pos[i*3]=Math.cos(ang)*r;
     pos[i*3+1]=y;
-    pos[i*3+2]=Math.sin(a)*r;
+    pos[i*3+2]=Math.sin(ang)*r;
   }
-
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
   const m=new THREE.PointsMaterial({
-    color,
-    size,
-    transparent:true,
-    opacity:0,
-    depthWrite:false,
-    sizeAttenuation:true
+    color,size,transparent:true,opacity:0,depthWrite:false,sizeAttenuation:true
   });
   const stars=new THREE.Points(g,m);
   stars.frustumCulled=false;
+  stars.userData.twinklePhase=Math.random()*Math.PI*2;
+  stars.userData.twinkleSpeed=.35+Math.random()*.95;
+  stars.userData.twinkleStrength=.18+Math.random()*.28;
+  stars.userData.baseOpacity=.55+Math.random()*.35;
   return stars;
 }
 
 function createStarField(){
   const group=new THREE.Group();
   group.name='Atelier Stars';
-  group.add(
-    makeClusteredStarLayer(360,.045,0xfff4c7,.76),
-    makeClusteredStarLayer(115,.075,0xffe7a6,.68),
-    makeClusteredStarLayer(28,.115,0xffd985,.58)
-  );
+  const palette=[0xfff7d6,0xffefb3,0xffe49a,0xfff2c2];
+  for(let i=0;i<10;i++){
+    group.add(makeClusteredStarLayer(
+      38+Math.floor(Math.random()*24),
+      .035+Math.random()*.075,
+      palette[i%palette.length],
+      .60+Math.random()*.28
+    ));
+  }
   scene.add(group);
   return group;
 }
 const starField=createStarField();
+
+function updateStarTwinkle(nowMs){
+  if(!starField.visible)return;
+  const t=nowMs*.001;
+  const nightOpacity=Math.max(0,(nightFactor-.12)/.88);
+  starField.children.forEach(layer=>{
+    const wave=.5+.5*Math.sin(t*(layer.userData.twinkleSpeed||.7)+(layer.userData.twinklePhase||0));
+    const base=layer.userData.baseOpacity||.7;
+    const strength=layer.userData.twinkleStrength||.2;
+    layer.material.opacity=nightOpacity*Math.max(.18,base-strength+wave*strength*2);
+  });
+}
 
 function computeNightFactor(){
   const d=new Date();
@@ -390,20 +403,24 @@ function cloneAsNightCapableMaterial(mat,nameSuffix=' Night'){
 function registerNightWindows(root){
   nightWindowMeshes.length=0;
   if(!root)return;
-
   root.updateMatrixWorld(true);
+
   root.traverse(o=>{
     if(!o.isMesh || !o.material)return;
     const n=(o.name||'').trim();
     const u=n.toUpperCase();
-    const isWindow=
-      /^EXT\s+HOUSE\s+\d+\s+WINDOW\s+[01](?:\.\d+)?$/i.test(n) ||
-      (u.includes('EXT HOUSE') && u.includes('WINDOW'));
-    if(!isWindow)return;
+    if(!(u.includes('EXT HOUSE') && u.includes('WINDOW')))return;
 
-    const mats=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>cloneAsNightCapableMaterial(mat,' WindowNight'));
-    o.material=Array.isArray(o.material)?mats:mats[0];
-    o.userData.atelierWindow=true;
+    const source=Array.isArray(o.material)?o.material:[o.material];
+    o.userData.atelierDayMaterials=source.map(mat=>mat?.clone?.()||mat);
+    o.userData.atelierNightMaterials=source.map((mat,index)=>new THREE.MeshBasicMaterial({
+      name:(mat?.name||('Window '+index))+' Lit',
+      color:0xffd58f,
+      transparent:false,
+      opacity:1,
+      side:mat?.side??THREE.FrontSide,
+      toneMapped:false
+    }));
     nightWindowMeshes.push(o);
   });
 
@@ -500,37 +517,18 @@ function registerFlowerNightLights(lightRoot,flowerRoot){
 }
 
 function updateRegisteredNightLights(factor){
-  const warmWindow=new THREE.Color(0xffd08c);
-  const warmEmissive=new THREE.Color(0xffc36f);
+  const windowOn=factor>.18;
 
   for(const mesh of nightWindowMeshes){
-    const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
-    for(const mat of mats){
-      if(!mat?.color || !mat?.emissive)continue;
-      mat.color.copy(mat.userData.nightBaseColor).lerp(warmWindow,.92*factor);
-      mat.emissive.copy(mat.userData.nightBaseEmissive).lerp(warmEmissive,factor);
-      mat.emissiveIntensity=THREE.MathUtils.lerp(mat.userData.nightBaseIntensity,7.5,factor);
-      mat.needsUpdate=true;
-    }
+    const mats=windowOn?mesh.userData.atelierNightMaterials:mesh.userData.atelierDayMaterials;
+    if(mats?.length)mesh.material=Array.isArray(mesh.material)?mats:mats[0];
   }
 
   for(const item of flowerNightLights){
-    item.light.intensity=3.6*factor;
-    item.halo.material.opacity=.82*factor;
-    const scale=THREE.MathUtils.lerp(.85,1.45,factor);
+    item.light.intensity=4.2*factor;
+    item.halo.material.opacity=.92*factor;
+    const scale=THREE.MathUtils.lerp(.9,1.65,factor);
     item.halo.scale.set(scale,scale,1);
-
-    item.anchor.traverse?.(o=>{
-      if(!o.isMesh || !o.userData.atelierFlowerLightMesh)return;
-      const mats=Array.isArray(o.material)?o.material:[o.material];
-      for(const mat of mats){
-        if(!mat?.color || !mat?.emissive)continue;
-        mat.color.copy(mat.userData.nightBaseColor).lerp(new THREE.Color(0xffe5a2),.45*factor);
-        mat.emissive.copy(mat.userData.nightBaseEmissive).lerp(new THREE.Color(0xffd36f),factor);
-        mat.emissiveIntensity=THREE.MathUtils.lerp(mat.userData.nightBaseIntensity,8.0,factor);
-        mat.needsUpdate=true;
-      }
-    });
   }
 }
 
@@ -545,11 +543,7 @@ function updateDayNightLighting(force=false){
   sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
   fill.intensity=THREE.MathUtils.lerp(.35,.15,nightFactor);
   scene.environmentIntensity=THREE.MathUtils.lerp(.38,.12,nightFactor);
-  const starOpacity=Math.max(0,(nightFactor-.12)/.88);
   starField.visible=nightFactor>.06;
-  starField.children.forEach((layer,index)=>{
-    layer.material.opacity=starOpacity*[.72,.88,1][index];
-  });
 
   const dayCloud=new THREE.Color(0xffffff);
   const nightCloud=new THREE.Color(0xaab6c8);
@@ -1249,53 +1243,36 @@ function recolorBeret(model,color){
 }
 function forceEaselWoodMaterials(root){
   if(!root)return;
+  root.traverse(mesh=>{
+    if(!mesh.isMesh || !mesh.material || !hasNamedAncestor(mesh,'easel'))return;
 
-  const easelRoots=collectNamedRoots(root,o=>/^easel(?:\s|_|\d)/i.test((o.name||'').trim()));
-  for(const easel of easelRoots){
-    easel.updateMatrixWorld(true);
-    const meshes=[];
-    easel.traverse(o=>{
-      if(o.isMesh && o.material)meshes.push(o);
+    const objectName=(mesh.name||'').toLowerCase();
+    const source=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+    const fixed=source.map(mat=>{
+      if(!mat)return mat;
+      const materialName=(mat.name||'').toLowerCase();
+      const isCanvasSlot=
+        materialName.includes('canvas') &&
+        !objectName.includes('clamp') &&
+        !objectName.includes('clip') &&
+        !objectName.includes('holder') &&
+        !objectName.includes('support') &&
+        !objectName.includes('top');
+      if(isCanvasSlot)return mat;
+
+      const m=mat.clone();
+      if(m.color)m.color.set('#6f4228');
+      if('roughness' in m)m.roughness=.58;
+      if('metalness' in m)m.metalness=0;
+      if('transmission' in m)m.transmission=0;
+      m.transparent=false;
+      m.opacity=1;
+      m.depthWrite=true;
+      m.needsUpdate=true;
+      return m;
     });
-    if(!meshes.length)continue;
-
-    // Keep only the largest canvas-like mesh white.
-    let canvas=null;
-    let best=-Infinity;
-    for(const mesh of meshes){
-      const n=(mesh.name||'').toLowerCase();
-      const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
-      const materialNames=mats.map(m=>(m?.name||'').toLowerCase()).join(' ');
-      const box=new THREE.Box3().setFromObject(mesh);
-      const size=box.getSize(new THREE.Vector3());
-      const dims=[size.x,size.y,size.z].sort((a,b)=>b-a);
-      const faceArea=dims[0]*dims[1];
-      const looksCanvas=n.includes('canvas') || n.includes('painting') || n.includes('artwork') || materialNames.includes('canvas');
-      const score=faceArea*(looksCanvas?10:1);
-      if(score>best){best=score;canvas=mesh;}
-    }
-
-    for(const mesh of meshes){
-      if(mesh===canvas)continue;
-      const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
-      const fixed=mats.map(mat=>{
-        if(!mat)return mat;
-        const m=mat.clone();
-        if(m.color)m.color.set('#6f4228');
-        if('roughness' in m)m.roughness=.58;
-        if('metalness' in m)m.metalness=0;
-        if('transmission' in m)m.transmission=0;
-        m.transparent=false;
-        m.opacity=1;
-        m.depthWrite=true;
-        m.needsUpdate=true;
-        return m;
-      });
-      mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
-    }
-
-    console.log('Easel material fix',easel.name,'canvas kept:',canvas?.name||'none');
-  }
+    mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
+  });
 }
 
 function keepOnlyFurniture(root){
@@ -4011,7 +3988,6 @@ Promise.all([
     stripEmbeddedBoatFromExternalEnvironment(extEnvGLB);
     enhanceMaterials(extEnvGLB.scene);
     scene.add(extEnvGLB.scene);
-    registerNightWindows(extEnvGLB.scene);
 
     if(extEnvGLB.animations?.length){
       extEnvMixer=new THREE.AnimationMixer(extEnvGLB.scene);
@@ -4053,7 +4029,8 @@ Promise.all([
     scene.add(flowerLightGLB.scene);
   }
 
-  registerFlowerNightLights(flowerLightGLB?.scene,flowerGLB?.scene);
+  registerNightWindows(scene);
+  registerFlowerNightLights(scene,scene);
   updateDayNightLighting(true);
 
   createBridgeAndGalleryLot();
@@ -4500,6 +4477,7 @@ function tick(){
   updateAtmosphericClouds(dt);
   updateSnow(dt);
   updateDayNightLighting();
+  updateStarTwinkle(performance.now());
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
   scene.traverse(o=>{
