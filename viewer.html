@@ -14,7 +14,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #topActions{position:fixed;right:18px;top:18px;z-index:12;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);padding:4px 5px}
 #historyBtn,#accountBtn{position:static;box-sizing:border-box;border:0;border-radius:10px;background:transparent;color:#4b3a30;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease;white-space:nowrap}
 #historyBtn{min-height:34px;padding:7px 10px;font-size:13px}
-#accountBtn{width:34px;height:34px;padding:0;font-size:11px;font-weight:900;letter-spacing:-.2px}
+#accountBtn{width:34px;height:34px;padding:0;font-size:17px;line-height:1}
 #historyBtn:hover,#accountBtn:hover{color:#b05a48;background:rgba(176,90,72,.07)}
 #controlHint{position:fixed;left:50%;bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px));transform:translate(-50%,10px);z-index:11;max-width:min(88vw,720px);color:#fff;font-size:13px;font-weight:750;text-align:center;line-height:1.4;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.72);opacity:0;transition:opacity .5s ease,transform .5s ease;pointer-events:none;white-space:normal}
 #controlHint.show{opacity:1;transform:translate(-50%,0)}
@@ -24,7 +24,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
   #timerPanel{left:10px;top:12px;right:auto;font-size:12px;max-width:45vw}
   #topActions{right:10px;top:8px;left:auto}
   #historyBtn{min-height:32px;padding:6px 8px;font-size:11px}
-  #accountBtn{width:32px;height:32px;font-size:10px}
+  #accountBtn{width:32px;height:32px;font-size:16px}
   #controlHint{bottom:max(30px,calc(env(safe-area-inset-bottom) + 18px));font-size:12px;max-width:86vw}
   #centerHint{font-size:14px}
 }
@@ -94,7 +94,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <div id="topActions">
   <button id="historyBtn">내 그림 진행 기록</button>
-  <button id="accountBtn">내 계정</button>
+  <button id="accountBtn" aria-label="내 계정" title="내 계정">👤</button>
 </div>
 <div id="controlHint"></div>
 <div id="centerHint"></div>
@@ -199,7 +199,7 @@ function applyLocaleUI(){
     'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
   );
   historyBtn.textContent=t('내 그림 진행 기록','My Art Progress');
-  accountBtn.textContent='MY';
+  accountBtn.textContent='👤';
   accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
   accountDesc.textContent=t(
     '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
@@ -980,18 +980,29 @@ function constrainWalkable(next,previous){
 function recolorBeret(model,color){
   if(!model)return;
   model.updateMatrixWorld(true);
+
   const whole=new THREE.Box3().setFromObject(model);
   const wholeSize=whole.getSize(new THREE.Vector3());
-  const topThreshold=whole.min.y+wholeSize.y*.72;
-  const fallback=[];
+  const topThreshold=whole.min.y+wholeSize.y*.70;
 
-  function paintMaterial(o,index,mat){
+  const namedSlots=[];
+  const fallbackSlots=[];
+
+  const tokenMatch=value=>{
+    const v=(value||'').toLowerCase();
+    return /(^|[\s_.-])(beret|hat)([\s_.-]|$)/.test(v);
+  };
+
+  const paintSlot=(o,index,mat)=>{
     const cloned=mat.clone();
     if(cloned.color)cloned.color.setHex(color);
-    if(cloned.map)cloned.map=null;
+    // Player berets use a clean flat color. Remove multipliers that can keep it black.
+    if('map' in cloned)cloned.map=null;
+    if('vertexColors' in cloned)cloned.vertexColors=false;
     if('roughness' in cloned)cloned.roughness=.72;
     if('metalness' in cloned)cloned.metalness=0;
     cloned.needsUpdate=true;
+
     if(Array.isArray(o.material)){
       const arr=o.material.slice();
       arr[index]=cloned;
@@ -999,47 +1010,73 @@ function recolorBeret(model,color){
     }else{
       o.material=cloned;
     }
-  }
+  };
 
-  let namedHits=0;
   model.traverse(o=>{
     if(!o.isMesh)return;
-    const on=(o.name||'').toLowerCase();
+
     const mats=Array.isArray(o.material)?o.material:[o.material];
+    const objectNamed=tokenMatch(o.name);
 
-    mats.forEach((mat,index)=>{
-      if(!mat)return;
-      const mn=(mat.name||'').toLowerCase();
-      if(on.includes('beret')||on.includes('hat')||on.includes('cap')||
-         mn.includes('beret')||mn.includes('hat')||mn.includes('cap')){
-        paintMaterial(o,index,mat);
-        namedHits++;
-      }
-    });
-
-    if(namedHits)return;
     const box=new THREE.Box3().setFromObject(o);
     const size=box.getSize(new THREE.Vector3());
     const center=box.getCenter(new THREE.Vector3());
-    const mats2=Array.isArray(o.material)?o.material:[o.material];
-    const dark=mats2.some(mat=>{
-      if(!mat?.color)return false;
-      const c=mat.color;
-      return (c.r+c.g+c.b)/3<.20;
+    const inHeadZone=center.y>=topThreshold;
+    const flatEnough=size.y<=wholeSize.y*.20;
+    const wideEnough=Math.max(size.x,size.z)>=wholeSize.y*.07;
+
+    mats.forEach((mat,index)=>{
+      if(!mat)return;
+      const materialNamed=tokenMatch(mat.name);
+
+      // Strongest signal: the material slot itself is named for the beret/hat.
+      if(materialNamed){
+        namedSlots.push({o,index,mat,priority:2});
+        return;
+      }
+
+      // If only the mesh is named, choose just its darkest material slot later.
+      // This avoids recoloring hair when hair + beret share one mesh.
+      if(objectNamed){
+        const lum=mat.color ? (mat.color.r+mat.color.g+mat.color.b)/3 : 1;
+        namedSlots.push({o,index,mat,priority:1,lum});
+        return;
+      }
+
+      // Last-resort spatial fallback: only upper-head, flat/wide, dark material slots.
+      if(inHeadZone && flatEnough && wideEnough){
+        const lum=mat.color ? (mat.color.r+mat.color.g+mat.color.b)/3 : 1;
+        if(lum<.28)fallbackSlots.push({o,index,mat,lum,centerY:center.y});
+      }
     });
-    if(dark && center.y>=topThreshold && size.y<=wholeSize.y*.18 && Math.max(size.x,size.z)>=wholeSize.y*.08){
-      fallback.push({o,score:center.y-size.y*.35});
-    }
   });
 
-  if(namedHits===0 && fallback.length){
-    fallback.sort((a,b)=>b.score-a.score);
-    const o=fallback[0].o;
-    const mats=Array.isArray(o.material)?o.material:[o.material];
-    mats.forEach((mat,index)=>{if(mat)paintMaterial(o,index,mat);});
+  let targets=[];
+  const explicitMaterials=namedSlots.filter(x=>x.priority===2);
+  if(explicitMaterials.length){
+    targets=explicitMaterials;
+  }else{
+    const namedMeshes=namedSlots.filter(x=>x.priority===1);
+    if(namedMeshes.length){
+      // Pick only the darkest slot among hat-named meshes.
+      namedMeshes.sort((a,b)=>(a.lum??1)-(b.lum??1));
+      targets=[namedMeshes[0]];
+    }else if(fallbackSlots.length){
+      // Pick one darkest/highest slot only; never recolor multiple head materials.
+      fallbackSlots.sort((a,b)=>(a.lum-b.lum) || (b.centerY-a.centerY));
+      targets=[fallbackSlots[0]];
+    }
+  }
+
+  targets.forEach(x=>paintSlot(x.o,x.index,x.mat));
+
+  if(targets.length){
+    const debug=targets.map(x=>({object:x.o.name||'',material:x.mat.name||''}));
+    console.log('Beret recolor target',debug,'color',color);
+  }else{
+    console.warn('Beret material not found; no hair/material fallback was modified.');
   }
 }
-
 function keepOnlyFurniture(root){
   root.traverse(o=>{
     if(o===root)return;
@@ -1592,7 +1629,9 @@ function ensureRemoteAvatar(id,state={}){
   }
   if(state.displayName){
     entry.displayName=state.displayName;
-    setAvatarNameLabel(entry.root,state.displayName);
+    if((entry.greetingUntil||0)<=performance.now()){
+      setAvatarNameLabel(entry.root,state.displayName);
+    }
   }
   return entry;
 }
@@ -1758,12 +1797,24 @@ function playSynchronizedGreeting(entry,startAtMs){
     localGreetingUntil=performance.now()+GREET_DURATION_MS;
     entry.greetingUntil=performance.now()+GREET_DURATION_MS;
 
+    const greetText=t('👋 반가워요!','👋 Hi!');
+    setAvatarNameLabel(avatarRoot,greetText);
+    setAvatarNameLabel(entry.root,greetText);
+    const ownGreetLabel=avatarRoot.getObjectByName('Player Name Label');
+    const remoteGreetLabel=entry.root.getObjectByName('Player Name Label');
+    if(ownGreetLabel)ownGreetLabel.visible=true;
+    if(remoteGreetLabel)remoteGreetLabel.visible=true;
+
     if(avatarActions?.['Avatar_Greet'])playAvatar('Avatar_Greet',.08);
     if(entry.actions?.['Avatar_Greet'])playRemote(entry,'Avatar_Greet');
 
     setTimeout(()=>{
       if(!playerSeat)playAvatar('Avatar_Idle',.10);
       if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
+      setAvatarNameLabel(avatarRoot,displayName);
+      if(remoteAvatars.has(entry.clientId)){
+        setAvatarNameLabel(entry.root,entry.displayName||t('이름 없는 화가','Unnamed artist'));
+      }
     },GREET_DURATION_MS);
   },delay);
 }
@@ -1914,7 +1965,7 @@ async function adoptGuestDataIntoAccount(user){
   await fetchServerState();
 
   if(avatarRoot)setAvatarNameLabel(avatarRoot,displayName);
-  accountBtn.textContent='MY';
+  accountBtn.textContent='👤';
   accountEmail.style.display='none';
   accountAction.style.display='none';
   logoutBtn.style.display='block';
@@ -1926,7 +1977,7 @@ function resetToGuestIdentity(){
   ownerId=clientId;
   activeWorkId=null;
   activeWorkCoverUrl=null;
-  accountBtn.textContent='MY';
+  accountBtn.textContent='👤';
   accountEmail.style.display='block';
   accountAction.style.display='block';
   logoutBtn.style.display='none';
