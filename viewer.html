@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>좀쓰화실 DEBUG 01</title>
+<title>좀쓰화실 DEBUG 02</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
@@ -100,7 +100,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="runtimeDebug">DEBUG 01
+<div id="runtimeDebug">DEBUG 02
 booting…</div>
 <div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
@@ -165,6 +165,7 @@ booting…</div>
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {createClient} from '@supabase/supabase-js';
@@ -269,18 +270,19 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
 const runtimeDebug=document.getElementById('runtimeDebug');
-window.__ATELIER_DEBUG_VERSION='DEBUG 01';
+const assetLoadErrors=[];
+window.__ATELIER_DEBUG_VERSION='DEBUG 02';
 function updateRuntimeDebug(extra=''){
   if(!runtimeDebug)return;
   const windows=Array.isArray(window.__debugNightWindows)?window.__debugNightWindows.length:0;
   const flowers=Array.isArray(window.__debugFlowerLights)?window.__debugFlowerLights.length:0;
-  const stars=typeof starField!=='undefined' && starField?.children ? starField.children.length : 0;
+  const stars=typeof starField!=='undefined' && starField?.children ? starField.children.reduce((n,layer)=>n+(layer.geometry?.attributes?.position?.count||0),0) : 0;
   const wNames=(window.__debugNightWindows||[]).slice(0,2).map(o=>o.name).join(', ');
   const fNames=(window.__debugFlowerLights||[]).slice(0,2).map(x=>x.anchor?.name||'').join(', ');
-  runtimeDebug.textContent='DEBUG 01\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+
-    (wNames?'\nW: '+wNames:'')+(fNames?'\nF: '+fNames:'')+(extra?'\n'+extra:'');
+  runtimeDebug.textContent='DEBUG 02\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+
+    (wNames?'\nW: '+wNames:'')+(fNames?'\nF: '+fNames:'')+(extra?'\n'+extra:'')+(assetLoadErrors.length?'\nFAILED: '+assetLoadErrors.join(', '):'');
 }
-console.log('ATELIER DEBUG 01 loaded');
+console.log('ATELIER DEBUG 02 loaded');
 
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
@@ -347,6 +349,10 @@ const starGlowTexture=makeStarGlowTexture();
 
 function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   const pos=new Float32Array(count*3);
+  const colors=new Float32Array(count*3);
+  const phases=new Float32Array(count);
+  const speeds=new Float32Array(count);
+  const baseColor=new THREE.Color(color);
   const clusters=[
     {a:.35,y:18},{a:1.15,y:24},{a:2.05,y:15},{a:2.9,y:26},
     {a:3.85,y:20},{a:4.65,y:28},{a:5.35,y:16},{a:5.9,y:23}
@@ -365,14 +371,20 @@ function makeClusteredStarLayer(count,size,color,clusterBias=.72){
     pos[i*3]=Math.cos(ang)*r;
     pos[i*3+1]=y;
     pos[i*3+2]=Math.sin(ang)*r;
+    phases[i]=Math.random()*Math.PI*2;
+    speeds[i]=.5+Math.random()*1.7;
+    colors[i*3]=baseColor.r;
+    colors[i*3+1]=baseColor.g;
+    colors[i*3+2]=baseColor.b;
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(colors,3));
   const m=new THREE.PointsMaterial({
-    color,
-    size:size*1.85,
+    color:0xffffff,
+    size:size*2.6,
     map:starGlowTexture,
-    alphaMap:starGlowTexture,
+    vertexColors:true,
     transparent:true,
     opacity:0,
     depthWrite:false,
@@ -382,10 +394,9 @@ function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   });
   const stars=new THREE.Points(g,m);
   stars.frustumCulled=false;
-  stars.userData.twinklePhase=Math.random()*Math.PI*2;
-  stars.userData.twinkleSpeed=.35+Math.random()*.95;
-  stars.userData.twinkleStrength=.18+Math.random()*.28;
-  stars.userData.baseOpacity=.55+Math.random()*.35;
+  stars.userData.baseColor=baseColor;
+  stars.userData.phases=phases;
+  stars.userData.speeds=speeds;
   return stars;
 }
 
@@ -410,12 +421,17 @@ function updateStarTwinkle(nowMs){
   if(!starField.visible)return;
   const t=nowMs*.001;
   const nightOpacity=Math.max(0,(nightFactor-.12)/.88);
-  starField.children.forEach(layer=>{
-    const wave=.5+.5*Math.sin(t*(layer.userData.twinkleSpeed||.7)+(layer.userData.twinklePhase||0));
-    const base=layer.userData.baseOpacity||.7;
-    const strength=layer.userData.twinkleStrength||.2;
-    layer.material.opacity=nightOpacity*Math.max(.12,base-strength*1.15+wave*strength*2.5);
-  });
+  for(const layer of starField.children){
+    const attr=layer.geometry.attributes.color;
+    const {baseColor,phases,speeds}=layer.userData;
+    for(let i=0;i<attr.count;i++){
+      const wave=.5+.5*Math.sin(t*speeds[i]+phases[i]);
+      const brightness=.52+.60*wave;
+      attr.setXYZ(i,baseColor.r*brightness,baseColor.g*brightness,baseColor.b*brightness);
+    }
+    attr.needsUpdate=true;
+    layer.material.opacity=nightOpacity*.95;
+  }
 }
 
 function computeNightFactor(){
@@ -608,7 +624,7 @@ function updateDayNightLighting(force=false){
     cloud.traverse(o=>{
       if(!o.isSprite || !o.material)return;
       o.material.color.copy(dayCloud).lerp(nightCloud,nightFactor);
-      o.material.opacity=THREE.MathUtils.lerp(.98,.46,nightFactor);
+      o.material.opacity=THREE.MathUtils.lerp(.98,.14,nightFactor);
     });
   }
   for(const reflection of waterCloudReflections){
@@ -621,6 +637,9 @@ function updateDayNightLighting(force=false){
 updateDayNightLighting(true);
 
 const loader=new GLTFLoader();
+const dracoLoader=new DRACOLoader();
+dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/');
+loader.setDRACOLoader(dracoLoader);
 const clock=new THREE.Clock();
 
 const SUPABASE_URL='https://uuotlmljzvludygzrvvt.supabase.co';
@@ -804,7 +823,17 @@ let lastX=0,lastY=0;
 const keys=new Set();
 
 function loadGLB(url){
-  return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,reject));
+  return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,error=>{
+    console.error('[ATELIER] Failed to load model:',url,error);
+    reject(error);
+  }));
+}
+function loadOptionalGLB(url){
+  return loadGLB(url).catch(()=>{
+    assetLoadErrors.push(url.split('/').pop());
+    updateRuntimeDebug('model load failed');
+    return null;
+  });
 }
 
 function normalizeAvatarOrientation(model){
@@ -4016,11 +4045,11 @@ function stripEmbeddedBoatFromExternalEnvironment(extGLB){
 Promise.all([
   loadGLB('./models/atelier_environment_web.glb'),
   loadGLB('./models/avatar_01.glb'),
-  loadGLB('./models/atelier_furniture.glb').catch(()=>null),
-  loadGLB('./models/atelier_upper_lower_flower.glb').catch(()=>null),
-  loadGLB('./models/flower_light.glb').catch(()=>null),
-  loadGLB('./models/atelier_boat.glb').catch(()=>null),
-  loadGLB('./models/atelier_environment_ext_web.glb').catch(()=>null)
+  loadOptionalGLB('./models/atelier_furniture.glb'),
+  loadOptionalGLB('./models/atelier_upper_lower_flower.glb'),
+  loadOptionalGLB('./models/flower_light.glb'),
+  loadOptionalGLB('./models/atelier_boat.glb'),
+  loadOptionalGLB('./models/atelier_environment_ext_web.glb')
 ]).then(async ([envGLB,avGLB,furnitureGLB,flowerGLB,flowerLightGLB,boatGLB,extEnvGLB])=>{
   // Non-avatar GLBs must never contribute character meshes.
   // Catch both rigged duplicates and meshes accidentally exported as ordinary geometry.
@@ -4095,13 +4124,25 @@ Promise.all([
     scene.add(flowerGLB.scene);
   }
 
+  // Some older flower_light.glb exports contain the avatar instead of lights.
+  // Only attach the file if it truly contains flower-light objects.
+  let flowerLightRoot=null;
   if(flowerLightGLB){
-    enhanceMaterials(flowerLightGLB.scene);
-    scene.add(flowerLightGLB.scene);
+    let hasFlowerLight=false;
+    flowerLightGLB.scene.traverse(o=>{
+      if(normalizedAssetName(o.name).startsWith('flower light'))hasFlowerLight=true;
+    });
+    if(hasFlowerLight){
+      enhanceMaterials(flowerLightGLB.scene);
+      scene.add(flowerLightGLB.scene);
+      flowerLightRoot=flowerLightGLB.scene;
+    }else{
+      console.warn('[ATELIER] flower_light.glb has no flower lights; use lower flowers for glow');
+    }
   }
 
   registerNightWindows(scene);
-  registerFlowerNightLights(scene,scene);
+  registerFlowerNightLights(flowerLightRoot,flowerGLB?.scene||envGLB.scene);
   updateDayNightLighting(true);
   updateRuntimeDebug('assets loaded');
 
