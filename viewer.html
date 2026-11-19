@@ -297,32 +297,54 @@ const NIGHT_SKY=new THREE.Color(0x08111f);
 let nightFactor=0;
 let lastNightLightingUpdate=0;
 
-function createStarField(){
-  const count=260;
+function makeClusteredStarLayer(count,size,color,clusterBias=.72){
   const pos=new Float32Array(count*3);
+  const clusters=[
+    {a:.35,y:18},{a:1.15,y:24},{a:2.05,y:15},{a:2.9,y:26},
+    {a:3.85,y:20},{a:4.65,y:28},{a:5.35,y:16},{a:5.9,y:23}
+  ];
+
   for(let i=0;i<count;i++){
-    const r=24+Math.random()*18;
-    const a=Math.random()*Math.PI*2;
-    const y=10+Math.random()*18;
+    let a,y;
+    if(Math.random()<clusterBias){
+      const c=clusters[Math.floor(Math.random()*clusters.length)];
+      a=c.a+(Math.random()-.5)*.42;
+      y=c.y+(Math.random()-.5)*5.5;
+    }else{
+      a=Math.random()*Math.PI*2;
+      y=11+Math.random()*18;
+    }
+    const r=25+Math.random()*18;
     pos[i*3]=Math.cos(a)*r;
     pos[i*3+1]=y;
     pos[i*3+2]=Math.sin(a)*r;
   }
+
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
   const m=new THREE.PointsMaterial({
-    color:0xffffff,
-    size:.09,
+    color,
+    size,
     transparent:true,
     opacity:0,
     depthWrite:false,
     sizeAttenuation:true
   });
   const stars=new THREE.Points(g,m);
-  stars.name='Atelier Stars';
   stars.frustumCulled=false;
-  scene.add(stars);
   return stars;
+}
+
+function createStarField(){
+  const group=new THREE.Group();
+  group.name='Atelier Stars';
+  group.add(
+    makeClusteredStarLayer(360,.045,0xfff4c7,.76),
+    makeClusteredStarLayer(115,.075,0xffe7a6,.68),
+    makeClusteredStarLayer(28,.115,0xffd985,.58)
+  );
+  scene.add(group);
+  return group;
 }
 const starField=createStarField();
 
@@ -335,13 +357,39 @@ function computeNightFactor(){
   return 0;
 }
 
+const namedNightLightProxies=new Map();
+
+function ensureNamedNightLightProxy(o,isFlower,isWindow){
+  if(namedNightLightProxies.has(o.uuid))return namedNightLightProxies.get(o.uuid);
+
+  // Flowers get a real warm point light. Windows get a much weaker light and are capped
+  // so 40+ windows do not overwhelm mobile GPUs.
+  const existingWindowLights=[...namedNightLightProxies.values()].filter(x=>x.isWindow).length;
+  if(isWindow && existingWindowLights>=12)return null;
+
+  const light=new THREE.PointLight(
+    isFlower?0xffc66d:0xffb768,
+    0,
+    isFlower?3.2:2.2,
+    2.1
+  );
+  light.castShadow=false;
+
+  const pos=o.getWorldPosition(new THREE.Vector3());
+  light.position.copy(pos);
+  if(isFlower)light.position.y+=.06;
+  scene.add(light);
+
+  const info={light,isFlower,isWindow};
+  namedNightLightProxies.set(o.uuid,info);
+  return info;
+}
+
 function applyNamedNightLights(factor){
   scene.traverse(o=>{
     if(!o.isMesh || !o.material)return;
     const n=(o.name||'').toUpperCase();
     const isFlower=n.startsWith('FLOWER_LIGHT_');
-    // Accept both the original web naming convention and the Blender house-window names.
-    // Examples: HOUSE_WINDOW_01, EXT House 0 Window 0, EXT House 19 Window 1
     const isWindow=
       n.startsWith('HOUSE_WINDOW_') ||
       /^EXT HOUSE \d+ WINDOW [01]$/.test(n);
@@ -365,11 +413,24 @@ function applyNamedNightLights(factor){
         mat.userData._nightBaseIntensity=Number(mat.emissiveIntensity)||0;
       }
 
-      mat.emissive.set(isFlower?0xffc77a:0xffb36b);
-      mat.emissiveIntensity=(isFlower?2.2:1.7)*factor;
+      mat.emissive.set(isFlower?0xffd07a:0xffbd73);
+      mat.emissiveIntensity=(isFlower?5.5:4.2)*factor;
+      if(mat.color && factor>.25){
+        const warm=new THREE.Color(isFlower?0xffe4aa:0xffd59a);
+        mat.color.lerp(warm,.18*factor);
+      }
       mat.needsUpdate=true;
     }
+
+    const proxy=ensureNamedNightLightProxy(o,isFlower,isWindow);
+    if(proxy){
+      proxy.light.intensity=(isFlower?2.5:.75)*factor;
+    }
   });
+
+  for(const proxy of namedNightLightProxies.values()){
+    if(factor<=.01)proxy.light.intensity=0;
+  }
 }
 
 function updateDayNightLighting(force=false){
@@ -383,8 +444,26 @@ function updateDayNightLighting(force=false){
   sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
   fill.intensity=THREE.MathUtils.lerp(.35,.15,nightFactor);
   scene.environmentIntensity=THREE.MathUtils.lerp(.38,.12,nightFactor);
-  starField.material.opacity=Math.max(0,(nightFactor-.15)/.85)*.95;
-  starField.visible=nightFactor>.08;
+  const starOpacity=Math.max(0,(nightFactor-.12)/.88);
+  starField.visible=nightFactor>.06;
+  starField.children.forEach((layer,index)=>{
+    layer.material.opacity=starOpacity*[.72,.88,1][index];
+  });
+
+  const dayCloud=new THREE.Color(0xffffff);
+  const nightCloud=new THREE.Color(0xaab6c8);
+  for(const cloud of skyClouds){
+    cloud.traverse(o=>{
+      if(!o.isSprite || !o.material)return;
+      o.material.color.copy(dayCloud).lerp(nightCloud,nightFactor);
+      o.material.opacity=THREE.MathUtils.lerp(.98,.46,nightFactor);
+    });
+  }
+  for(const reflection of waterCloudReflections){
+    reflection.material.opacity=THREE.MathUtils.lerp(.58,.22,nightFactor);
+    reflection.material.color.set(0xd5edf4).lerp(new THREE.Color(0x718092),nightFactor);
+  }
+
   applyNamedNightLights(nightFactor);
 }
 updateDayNightLighting(true);
@@ -3854,7 +3933,7 @@ Promise.all([
       boatGLB.animations.forEach(clip=>{
         const action=boatMixer.clipAction(clip);
         action.setLoop(THREE.LoopRepeat,Infinity);
-        action.setEffectiveTimeScale(.70);
+        action.setEffectiveTimeScale(.35);
         action.reset().play();
       });
     }else{
