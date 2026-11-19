@@ -1823,17 +1823,9 @@ async function adoptGuestDataIntoAccount(user){
     if(profileInsertError && profileInsertError.code!=='23505')console.warn('profile create',profileInsertError);
   }
 
-  const {data:daily}=await supabase
-    .from('atelier_daily_work')
-    .select('work_seconds,updated_at')
-    .eq('owner_id',ownerId)
-    .eq('work_date',localDateKey())
-    .maybeSingle();
-
-  if(daily?.work_seconds!=null && new Date(daily.updated_at||0).getTime()>=TIMER_V2_CUTOFF_MS){
-    workElapsedSeconds=Math.max(workElapsedSeconds,Number(daily.work_seconds)||0);
-    saveProgress();
-  }
+  // Today's HUD timer is restored only from the current local timer version.
+  // Historical server rows are intentionally not used here because development/test
+  // sessions previously left stale seated-time values in atelier_daily_work.
 
   activeWorkId=null;
   activeWorkCoverUrl=null;
