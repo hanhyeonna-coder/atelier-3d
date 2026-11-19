@@ -3854,6 +3854,7 @@ Promise.all([
       boatGLB.animations.forEach(clip=>{
         const action=boatMixer.clipAction(clip);
         action.setLoop(THREE.LoopRepeat,Infinity);
+        action.setEffectiveTimeScale(.70);
         action.reset().play();
       });
     }else{
