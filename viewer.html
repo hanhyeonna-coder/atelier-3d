@@ -360,20 +360,67 @@ function computeNightFactor(){
   return 0;
 }
 
-const namedNightLightProxies=new Map();
+const nightWindowMeshes=[];
+const flowerNightLights=[];
+
+function cloneAsNightCapableMaterial(mat,nameSuffix=' Night'){
+  if(!mat)return null;
+  let m;
+  if('emissive' in mat){
+    m=mat.clone();
+  }else{
+    m=new THREE.MeshStandardMaterial({
+      name:(mat.name||'Material')+nameSuffix,
+      color:mat.color?.clone?.()||new THREE.Color(0xffffff),
+      map:mat.map||null,
+      transparent:!!mat.transparent,
+      opacity:Number.isFinite(mat.opacity)?mat.opacity:1,
+      side:mat.side??THREE.FrontSide,
+      roughness:.45,
+      metalness:0
+    });
+  }
+  m.userData={...mat.userData};
+  m.userData.nightBaseColor=m.color?.clone?.()||new THREE.Color(0xffffff);
+  m.userData.nightBaseEmissive=m.emissive?.clone?.()||new THREE.Color(0x000000);
+  m.userData.nightBaseIntensity=Number(m.emissiveIntensity)||0;
+  return m;
+}
+
+function registerNightWindows(root){
+  nightWindowMeshes.length=0;
+  if(!root)return;
+
+  root.updateMatrixWorld(true);
+  root.traverse(o=>{
+    if(!o.isMesh || !o.material)return;
+    const n=(o.name||'').trim();
+    const u=n.toUpperCase();
+    const isWindow=
+      /^EXT\s+HOUSE\s+\d+\s+WINDOW\s+[01](?:\.\d+)?$/i.test(n) ||
+      (u.includes('EXT HOUSE') && u.includes('WINDOW'));
+    if(!isWindow)return;
+
+    const mats=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>cloneAsNightCapableMaterial(mat,' WindowNight'));
+    o.material=Array.isArray(o.material)?mats:mats[0];
+    o.userData.atelierWindow=true;
+    nightWindowMeshes.push(o);
+  });
+
+  console.log('Registered night windows:',nightWindowMeshes.length,nightWindowMeshes.map(o=>o.name));
+}
 
 function makeWarmGlowTexture(){
   const c=document.createElement('canvas');
   c.width=c.height=256;
   const ctx=c.getContext('2d');
   const g=ctx.createRadialGradient(128,128,8,128,128,120);
-  g.addColorStop(0,'rgba(255,242,190,.95)');
-  g.addColorStop(.22,'rgba(255,220,135,.68)');
-  g.addColorStop(.52,'rgba(255,190,90,.28)');
-  g.addColorStop(1,'rgba(255,170,70,0)');
+  g.addColorStop(0,'rgba(255,246,205,.98)');
+  g.addColorStop(.20,'rgba(255,222,135,.78)');
+  g.addColorStop(.50,'rgba(255,188,80,.34)');
+  g.addColorStop(1,'rgba(255,160,55,0)');
   ctx.fillStyle=g;
   ctx.fillRect(0,0,256,256);
-
   const tex=new THREE.CanvasTexture(c);
   tex.colorSpace=THREE.SRGBColorSpace;
   tex.minFilter=THREE.LinearFilter;
@@ -382,32 +429,54 @@ function makeWarmGlowTexture(){
 }
 const warmGlowTexture=makeWarmGlowTexture();
 
-function ensureNamedNightLightProxy(o,isFlower,isWindow){
-  if(namedNightLightProxies.has(o.uuid))return namedNightLightProxies.get(o.uuid);
+function collectNamedRoots(root,predicate){
+  const found=[];
+  if(!root)return found;
+  root.traverse(o=>{
+    if(o===root || !predicate(o))return;
+    let p=o.parent;
+    while(p && p!==root){
+      if(predicate(p))return;
+      p=p.parent;
+    }
+    found.push(o);
+  });
+  return found;
+}
 
-  // Flowers get a real warm point light + visible halo.
-  // Windows get weaker point lights and are capped for mobile performance.
-  const existingWindowLights=[...namedNightLightProxies.values()].filter(x=>x.isWindow).length;
-  const allowPointLight=!(isWindow && existingWindowLights>=12);
+function registerFlowerNightLights(lightRoot,flowerRoot){
+  for(const item of flowerNightLights){
+    if(item.light)scene.remove(item.light);
+    if(item.halo)scene.remove(item.halo);
+  }
+  flowerNightLights.length=0;
 
-  let light=null;
-  if(allowPointLight){
-    light=new THREE.PointLight(
-      isFlower?0xffc66d:0xffb768,
-      0,
-      isFlower?3.6:2.4,
-      2.0
-    );
-    light.castShadow=false;
+  let anchors=collectNamedRoots(lightRoot,o=>(o.name||'').toUpperCase().startsWith('FLOWER_LIGHT_'));
 
-    const pos=o.getWorldPosition(new THREE.Vector3());
-    light.position.copy(pos);
-    if(isFlower)light.position.y+=.08;
-    scene.add(light);
+  // Fallback to actual lower-flower positions if the dedicated light GLB exported lights/empties
+  // without preserving the expected named mesh.
+  if(!anchors.length){
+    anchors=collectNamedRoots(flowerRoot,o=>(o.name||'').toLowerCase().includes('lower flower'));
   }
 
-  let halo=null;
-  if(isFlower){
+  for(const anchor of anchors.slice(0,16)){
+    anchor.updateMatrixWorld(true);
+    const pos=anchor.getWorldPosition(new THREE.Vector3());
+
+    // If the anchor contains visible meshes, make those meshes emissive too.
+    anchor.traverse?.(o=>{
+      if(!o.isMesh || !o.material)return;
+      const mats=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>cloneAsNightCapableMaterial(mat,' FlowerNight'));
+      o.material=Array.isArray(o.material)?mats:mats[0];
+      o.userData.atelierFlowerLightMesh=true;
+    });
+
+    const light=new THREE.PointLight(0xffca72,0,3.8,2.0);
+    light.position.copy(pos);
+    light.position.y+=.08;
+    light.castShadow=false;
+    scene.add(light);
+
     const haloMat=new THREE.SpriteMaterial({
       map:warmGlowTexture,
       color:0xffd889,
@@ -417,104 +486,51 @@ function ensureNamedNightLightProxy(o,isFlower,isWindow){
       depthTest:false,
       blending:THREE.AdditiveBlending
     });
-    halo=new THREE.Sprite(haloMat);
+    const halo=new THREE.Sprite(haloMat);
     halo.name='Flower Night Halo';
-    const pos=o.getWorldPosition(new THREE.Vector3());
     halo.position.copy(pos);
-    halo.scale.set(1.05,1.05,1);
-    halo.renderOrder=60;
+    halo.scale.set(1.25,1.25,1);
+    halo.renderOrder=80;
     scene.add(halo);
+
+    flowerNightLights.push({anchor,light,halo});
   }
 
-  const info={light,halo,isFlower,isWindow};
-  namedNightLightProxies.set(o.uuid,info);
-  return info;
+  console.log('Registered flower night lights:',flowerNightLights.length,anchors.map(o=>o.name));
 }
 
-function applyNamedNightLights(factor){
-  scene.traverse(o=>{
-    if(!o.isMesh || !o.material)return;
-    const n=(o.name||'').toUpperCase();
-    const isFlower=n.startsWith('FLOWER_LIGHT_');
-    const isWindow=
-      n.startsWith('HOUSE_WINDOW_') ||
-      /^EXT HOUSE \d+ WINDOW [01]$/.test(n);
-    if(!isFlower && !isWindow)return;
+function updateRegisteredNightLights(factor){
+  const warmWindow=new THREE.Color(0xffd08c);
+  const warmEmissive=new THREE.Color(0xffc36f);
 
-    const mats=Array.isArray(o.material)?o.material:[o.material];
-    for(let i=0;i<mats.length;i++){
-      let mat=mats[i];
-      if(!mat)continue;
-
-      if(!mat.userData?._nightInit){
-        // Some exported window/light meshes use materials without emissive support.
-        // Convert them once to MeshStandardMaterial while preserving visible color/maps.
-        let cloned;
-        if('emissive' in mat){
-          cloned=mat.clone();
-        }else{
-          cloned=new THREE.MeshStandardMaterial({
-            name:(mat.name||'')+' NightCapable',
-            color:mat.color?.clone?.()||new THREE.Color(0xffffff),
-            map:mat.map||null,
-            transparent:!!mat.transparent,
-            opacity:Number.isFinite(mat.opacity)?mat.opacity:1,
-            side:mat.side??THREE.FrontSide,
-            roughness:(isFlower ? .52 : .42),
-            metalness:0
-          });
-        }
-        cloned.userData={...mat.userData,_nightInit:true};
-        if(Array.isArray(o.material)){
-          const arr=o.material.slice();
-          arr[i]=cloned;
-          o.material=arr;
-        }else{
-          o.material=cloned;
-        }
-        mat=cloned;
-      }
-
-      if(!mat.userData._nightBaseEmissive){
-        mat.userData._nightBaseEmissive=mat.emissive.clone();
-        mat.userData._nightBaseIntensity=Number(mat.emissiveIntensity)||0;
-        if(mat.color)mat.userData._nightBaseColor=mat.color.clone();
-      }
-
-      mat.emissive.copy(mat.userData._nightBaseEmissive).lerp(
-        new THREE.Color(isFlower?0xffd36f:0xffc36f),
-        factor
-      );
-      mat.emissiveIntensity=THREE.MathUtils.lerp(
-        mat.userData._nightBaseIntensity,
-        isFlower?7.5:7.0,
-        factor
-      );
-      if(mat.color && mat.userData._nightBaseColor){
-        mat.color.copy(mat.userData._nightBaseColor).lerp(
-          new THREE.Color(isFlower?0xffe8ad:0xffd28a),
-          (isFlower ? .38 : .88)*factor
-        );
-      }
+  for(const mesh of nightWindowMeshes){
+    const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+    for(const mat of mats){
+      if(!mat?.color || !mat?.emissive)continue;
+      mat.color.copy(mat.userData.nightBaseColor).lerp(warmWindow,.92*factor);
+      mat.emissive.copy(mat.userData.nightBaseEmissive).lerp(warmEmissive,factor);
+      mat.emissiveIntensity=THREE.MathUtils.lerp(mat.userData.nightBaseIntensity,7.5,factor);
       mat.needsUpdate=true;
     }
+  }
 
-    const proxy=ensureNamedNightLightProxy(o,isFlower,isWindow);
-    if(proxy){
-      if(proxy.light)proxy.light.intensity=(isFlower?3.2:1.05)*factor;
-      if(proxy.halo){
-        proxy.halo.material.opacity=.72*factor;
-        const haloScale=THREE.MathUtils.lerp(.72,1.28,factor);
-        proxy.halo.scale.set(haloScale,haloScale,1);
+  for(const item of flowerNightLights){
+    item.light.intensity=3.6*factor;
+    item.halo.material.opacity=.82*factor;
+    const scale=THREE.MathUtils.lerp(.85,1.45,factor);
+    item.halo.scale.set(scale,scale,1);
+
+    item.anchor.traverse?.(o=>{
+      if(!o.isMesh || !o.userData.atelierFlowerLightMesh)return;
+      const mats=Array.isArray(o.material)?o.material:[o.material];
+      for(const mat of mats){
+        if(!mat?.color || !mat?.emissive)continue;
+        mat.color.copy(mat.userData.nightBaseColor).lerp(new THREE.Color(0xffe5a2),.45*factor);
+        mat.emissive.copy(mat.userData.nightBaseEmissive).lerp(new THREE.Color(0xffd36f),factor);
+        mat.emissiveIntensity=THREE.MathUtils.lerp(mat.userData.nightBaseIntensity,8.0,factor);
+        mat.needsUpdate=true;
       }
-    }
-  });
-
-  for(const proxy of namedNightLightProxies.values()){
-    if(factor<=.01){
-      if(proxy.light)proxy.light.intensity=0;
-      if(proxy.halo)proxy.halo.material.opacity=0;
-    }
+    });
   }
 }
 
@@ -549,7 +565,7 @@ function updateDayNightLighting(force=false){
     reflection.material.color.set(0xd5edf4).lerp(new THREE.Color(0x718092),nightFactor);
   }
 
-  applyNamedNightLights(nightFactor);
+  updateRegisteredNightLights(nightFactor);
 }
 updateDayNightLighting(true);
 
@@ -1234,45 +1250,52 @@ function recolorBeret(model,color){
 function forceEaselWoodMaterials(root){
   if(!root)return;
 
-  root.traverse(o=>{
-    if(!o.isMesh || !hasNamedAncestor(o,'easel'))return;
-
-    const objectName=(o.name||'').toLowerCase();
-    const mats=Array.isArray(o.material)?o.material:[o.material];
-
-    const fixed=mats.map(mat=>{
-      if(!mat)return mat;
-      const materialName=(mat.name||'').toLowerCase();
-
-      // Never recolor the actual white painting canvas.
-      const forceWood=
-        objectName.includes('clamp') ||
-        objectName.includes('clip') ||
-        objectName.includes('holder') ||
-        objectName.includes('support') ||
-        objectName.includes('top');
-
-      const isCanvas=!forceWood && (
-        objectName.includes('canvas') ||
-        objectName.includes('painting') ||
-        objectName.includes('artwork')
-      );
-      if(isCanvas)return mat;
-
-      const m=mat.clone();
-      if(m.color)m.color.set('#6f4228');
-      if('roughness' in m)m.roughness=.58;
-      if('metalness' in m)m.metalness=0;
-      if('transmission' in m)m.transmission=0;
-      m.transparent=false;
-      m.opacity=1;
-      m.depthWrite=true;
-      m.needsUpdate=true;
-      return m;
+  const easelRoots=collectNamedRoots(root,o=>/^easel(?:\s|_|\d)/i.test((o.name||'').trim()));
+  for(const easel of easelRoots){
+    easel.updateMatrixWorld(true);
+    const meshes=[];
+    easel.traverse(o=>{
+      if(o.isMesh && o.material)meshes.push(o);
     });
+    if(!meshes.length)continue;
 
-    o.material=Array.isArray(o.material)?fixed:fixed[0];
-  });
+    // Keep only the largest canvas-like mesh white.
+    let canvas=null;
+    let best=-Infinity;
+    for(const mesh of meshes){
+      const n=(mesh.name||'').toLowerCase();
+      const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+      const materialNames=mats.map(m=>(m?.name||'').toLowerCase()).join(' ');
+      const box=new THREE.Box3().setFromObject(mesh);
+      const size=box.getSize(new THREE.Vector3());
+      const dims=[size.x,size.y,size.z].sort((a,b)=>b-a);
+      const faceArea=dims[0]*dims[1];
+      const looksCanvas=n.includes('canvas') || n.includes('painting') || n.includes('artwork') || materialNames.includes('canvas');
+      const score=faceArea*(looksCanvas?10:1);
+      if(score>best){best=score;canvas=mesh;}
+    }
+
+    for(const mesh of meshes){
+      if(mesh===canvas)continue;
+      const mats=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+      const fixed=mats.map(mat=>{
+        if(!mat)return mat;
+        const m=mat.clone();
+        if(m.color)m.color.set('#6f4228');
+        if('roughness' in m)m.roughness=.58;
+        if('metalness' in m)m.metalness=0;
+        if('transmission' in m)m.transmission=0;
+        m.transparent=false;
+        m.opacity=1;
+        m.depthWrite=true;
+        m.needsUpdate=true;
+        return m;
+      });
+      mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
+    }
+
+    console.log('Easel material fix',easel.name,'canvas kept:',canvas?.name||'none');
+  }
 }
 
 function keepOnlyFurniture(root){
@@ -3988,6 +4011,7 @@ Promise.all([
     stripEmbeddedBoatFromExternalEnvironment(extEnvGLB);
     enhanceMaterials(extEnvGLB.scene);
     scene.add(extEnvGLB.scene);
+    registerNightWindows(extEnvGLB.scene);
 
     if(extEnvGLB.animations?.length){
       extEnvMixer=new THREE.AnimationMixer(extEnvGLB.scene);
@@ -4028,6 +4052,9 @@ Promise.all([
     enhanceMaterials(flowerLightGLB.scene);
     scene.add(flowerLightGLB.scene);
   }
+
+  registerFlowerNightLights(flowerLightGLB?.scene,flowerGLB?.scene);
+  updateDayNightLighting(true);
 
   createBridgeAndGalleryLot();
   createAtmosphericClouds();
