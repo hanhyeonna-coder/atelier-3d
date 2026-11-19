@@ -989,6 +989,11 @@ function recolorBeret(model,color){
 
       const cloned=mat.clone();
       if(cloned.color)cloned.color.setHex(color);
+      // A black base-color texture multiplies any tint back to black.
+      // Berets are intentionally flat-colored per player, so remove that map here.
+      if(cloned.map)cloned.map=null;
+      if('roughness' in cloned)cloned.roughness=.72;
+      if('metalness' in cloned)cloned.metalness=0;
       cloned.needsUpdate=true;
 
       if(Array.isArray(o.material)){
@@ -1701,18 +1706,33 @@ const GREET_COOLDOWN_MS=18000;
 const GREET_DISPLAY_MS=2200;
 
 function maybeTriggerNearbyGreeting(entry,distance){
-  if(distance>GREET_DISTANCE)return;
+  if(distance>GREET_DISTANCE || playerSeat)return;
   const now=performance.now();
   if(now-(entry.lastGreetingAt||0)<GREET_COOLDOWN_MS)return;
 
   entry.lastGreetingAt=now;
   const base=entry.root.getObjectByName('Player Name Label')?.userData?.labelText || t('이름 없는 화가','Unnamed artist');
 
+  // Briefly face each other before greeting.
+  const dx=entry.root.position.x-avatarRoot.position.x;
+  const dz=entry.root.position.z-avatarRoot.position.z;
+  if(Math.hypot(dx,dz)>.001){
+    avatarRoot.rotation.y=Math.atan2(dx,dz)+MODEL_YAW_CORRECTION;
+    entry.root.rotation.y=Math.atan2(-dx,-dz)+MODEL_YAW_CORRECTION;
+  }
+
   const greetAction=entry.actions?.['Avatar_Greet'];
   if(greetAction){
     playRemote(entry,'Avatar_Greet');
     setTimeout(()=>{
       if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
+    },1600);
+  }
+
+  if(avatarActions?.['Avatar_Greet']){
+    playAvatar('Avatar_Greet',.08);
+    setTimeout(()=>{
+      if(!playerSeat)playAvatar('Avatar_Idle',.10);
     },1600);
   }
 
