@@ -11,18 +11,18 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #loadingMessage{transition:opacity .28s ease,transform .28s ease;text-align:center;padding:0 24px}
 #loadingMessage.swap{opacity:0;transform:translateY(5px)}
 #timerPanel{position:fixed;left:16px;top:16px;z-index:12;min-height:40px;box-sizing:border-box;border:1px solid rgba(93,73,61,.08);border-radius:13px;padding:9px 14px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);color:#4b3a30;box-shadow:0 7px 22px rgba(0,0,0,.10);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
-#topActions{position:fixed;right:18px;top:18px;z-index:12;width:178px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);overflow:hidden}
-#historyBtn,#accountBtn{position:static;width:100%;min-height:42px;box-sizing:border-box;border:0;border-radius:0;padding:10px 14px;background:transparent;color:#4b3a30;font-weight:800;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease}
-#historyBtn{border-bottom:1px solid rgba(93,73,61,.10)}
+#topActions{position:fixed;right:18px;top:18px;z-index:12;width:320px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border:1px solid rgba(93,73,61,.08);border-radius:14px;box-shadow:0 7px 22px rgba(0,0,0,.10);overflow:hidden;display:flex}
+#historyBtn,#accountBtn{position:static;flex:1 1 0;min-width:0;min-height:42px;box-sizing:border-box;border:0;border-radius:0;padding:10px 12px;background:transparent;color:#4b3a30;font-weight:800;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .16s ease,background .16s ease;white-space:nowrap}
+#historyBtn{border-right:1px solid rgba(93,73,61,.10)}
 #historyBtn:hover,#accountBtn:hover{color:#b05a48;background:rgba(176,90,72,.06)}
 #controlHint{position:fixed;left:50%;bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px));transform:translate(-50%,10px);z-index:11;max-width:min(88vw,720px);color:#fff;font-size:13px;font-weight:750;text-align:center;line-height:1.4;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.72);opacity:0;transition:opacity .5s ease,transform .5s ease;pointer-events:none;white-space:normal}
 #controlHint.show{opacity:1;transform:translate(-50%,0)}
 #centerHint{position:fixed;left:50%;top:50%;transform:translate(-50%,-42%);z-index:11;color:#fff;font-size:16px;font-weight:850;text-align:center;text-shadow:0 2px 5px rgba(0,0,0,.9),0 0 12px rgba(0,0,0,.72);opacity:0;transition:opacity .45s ease,transform .45s ease;pointer-events:none;max-width:82vw}
 #centerHint.show{opacity:1;transform:translate(-50%,-50%)}
 @media (max-width:640px){
-  #timerPanel{left:10px;top:10px;min-height:36px;padding:8px 10px;font-size:12px;max-width:calc(100vw - 164px)}
-  #topActions{right:10px;top:10px;width:144px}
-  #historyBtn,#accountBtn{min-height:38px;padding:8px 10px;font-size:12px}
+  #timerPanel{left:10px;right:10px;top:10px;min-height:36px;padding:8px 10px;font-size:12px;max-width:none}
+  #topActions{left:10px;right:10px;top:54px;width:auto}
+  #historyBtn,#accountBtn{min-height:38px;padding:8px 8px;font-size:11.5px}
   #controlHint{bottom:max(30px,calc(env(safe-area-inset-bottom) + 18px));font-size:12px;max-width:86vw}
   #centerHint{font-size:14px}
 }
@@ -457,8 +457,7 @@ let currentWorkElapsedSeconds=0;
 let workSaveAccumulator=0;
 let dailyWorkSyncAccumulator=0;
 const STORAGE_KEY='atelier3d_progress_v1';
-const TIMER_DATA_VERSION=2;
-const TIMER_V2_CUTOFF_MS=Date.parse('2026-11-19T06:30:00Z');
+const TIMER_DATA_VERSION=3;
 let savedArtworkDataUrl=null;
 let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
@@ -3783,7 +3782,6 @@ Promise.all([
 
   clearInterval(loadingCopyTimer);
   loading.style.display='none';
-  showStatus('빈 이젤에 앉으면 그 자리가 내 이젤이 됩니다');
 }).catch(err=>{
   console.error(err);
   clearInterval(loadingCopyTimer);
