@@ -411,13 +411,23 @@ function applyNamedNightLights(factor){
       if(!mat.userData._nightBaseEmissive){
         mat.userData._nightBaseEmissive=mat.emissive.clone();
         mat.userData._nightBaseIntensity=Number(mat.emissiveIntensity)||0;
+        if(mat.color)mat.userData._nightBaseColor=mat.color.clone();
       }
 
-      mat.emissive.set(isFlower?0xffd07a:0xffbd73);
-      mat.emissiveIntensity=(isFlower?5.5:4.2)*factor;
-      if(mat.color && factor>.25){
-        const warm=new THREE.Color(isFlower?0xffe4aa:0xffd59a);
-        mat.color.lerp(warm,.18*factor);
+      mat.emissive.copy(mat.userData._nightBaseEmissive).lerp(
+        new THREE.Color(isFlower?0xffd07a:0xffbd73),
+        factor
+      );
+      mat.emissiveIntensity=THREE.MathUtils.lerp(
+        mat.userData._nightBaseIntensity,
+        isFlower?5.5:4.2,
+        factor
+      );
+      if(mat.color && mat.userData._nightBaseColor){
+        mat.color.copy(mat.userData._nightBaseColor).lerp(
+          new THREE.Color(isFlower?0xffe4aa:0xffd59a),
+          .18*factor
+        );
       }
       mat.needsUpdate=true;
     }
