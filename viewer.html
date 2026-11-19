@@ -257,7 +257,7 @@ function showStatus(message,ms=2200){
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
-const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,.05,200);
+const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -414,7 +414,7 @@ function ensureNamedNightLightProxy(o,isFlower,isWindow){
       transparent:true,
       opacity:0,
       depthWrite:false,
-      depthTest:true,
+      depthTest:false,
       blending:THREE.AdditiveBlending
     });
     halo=new THREE.Sprite(haloMat);
@@ -422,7 +422,7 @@ function ensureNamedNightLightProxy(o,isFlower,isWindow){
     const pos=o.getWorldPosition(new THREE.Vector3());
     halo.position.copy(pos);
     halo.scale.set(1.05,1.05,1);
-    halo.renderOrder=6;
+    halo.renderOrder=60;
     scene.add(halo);
   }
 
@@ -444,13 +444,34 @@ function applyNamedNightLights(factor){
     const mats=Array.isArray(o.material)?o.material:[o.material];
     for(let i=0;i<mats.length;i++){
       let mat=mats[i];
-      if(!mat || !('emissive' in mat))continue;
+      if(!mat)continue;
 
-      if(!mat.userData._nightInit){
-        const cloned=mat.clone();
+      if(!mat.userData?._nightInit){
+        // Some exported window/light meshes use materials without emissive support.
+        // Convert them once to MeshStandardMaterial while preserving visible color/maps.
+        let cloned;
+        if('emissive' in mat){
+          cloned=mat.clone();
+        }else{
+          cloned=new THREE.MeshStandardMaterial({
+            name:(mat.name||'')+' NightCapable',
+            color:mat.color?.clone?.()||new THREE.Color(0xffffff),
+            map:mat.map||null,
+            transparent:!!mat.transparent,
+            opacity:Number.isFinite(mat.opacity)?mat.opacity:1,
+            side:mat.side??THREE.FrontSide,
+            roughness:isFlower?.52:.42,
+            metalness:0
+          });
+        }
         cloned.userData={...mat.userData,_nightInit:true};
-        if(Array.isArray(o.material))o.material[i]=cloned;
-        else o.material=cloned;
+        if(Array.isArray(o.material)){
+          const arr=o.material.slice();
+          arr[i]=cloned;
+          o.material=arr;
+        }else{
+          o.material=cloned;
+        }
         mat=cloned;
       }
 
@@ -466,13 +487,13 @@ function applyNamedNightLights(factor){
       );
       mat.emissiveIntensity=THREE.MathUtils.lerp(
         mat.userData._nightBaseIntensity,
-        isFlower?7.0:6.0,
+        isFlower?7.5:7.0,
         factor
       );
       if(mat.color && mat.userData._nightBaseColor){
         mat.color.copy(mat.userData._nightBaseColor).lerp(
           new THREE.Color(isFlower?0xffe8ad:0xffd28a),
-          (isFlower ? .28 : .72)*factor
+          (isFlower ? .38 : .88)*factor
         );
       }
       mat.needsUpdate=true;
@@ -699,7 +720,7 @@ const SIT_YAW_CORRECTION=0; // Seat faceDir already points from stool to easel; 
 
 // Camera orbit state. Completely independent from character facing.
 let camYaw=0;
-let camPitch=.28;
+let camPitch=.20;
 let camDistance=6.35;
 let camTarget=new THREE.Vector3(0,1.45,-1.8);
 let cameraFocus=new THREE.Vector3(0,1.45,-1.8);
@@ -1224,12 +1245,18 @@ function forceEaselWoodMaterials(root){
       const materialName=(mat.name||'').toLowerCase();
 
       // Never recolor the actual white painting canvas.
-      const isCanvas=
+      const forceWood=
+        objectName.includes('clamp') ||
+        objectName.includes('clip') ||
+        objectName.includes('holder') ||
+        objectName.includes('support') ||
+        objectName.includes('top');
+
+      const isCanvas=!forceWood && (
         objectName.includes('canvas') ||
         objectName.includes('painting') ||
-        objectName.includes('artwork') ||
-        materialName==='canvas' ||
-        materialName.includes('canvas');
+        objectName.includes('artwork')
+      );
       if(isCanvas)return mat;
 
       const m=mat.clone();
@@ -1255,10 +1282,11 @@ function keepOnlyFurniture(root){
     const keep=
       n.includes('easel') ||
       n.includes('stool') ||
-      n.includes('canvas');
+      n.includes('canvas') ||
+      hasNamedAncestor(o,'easel') ||
+      hasNamedAncestor(o,'stool');
 
-    // Keep parents of useful descendants; hide unrelated visible meshes.
-    if(o.isMesh && !keep)o.visible=false;
+    if(o.isMesh)o.visible=!!keep;
   });
 }
 
@@ -3468,7 +3496,7 @@ function updateCamera(){
     camTarget.z+dz2*horizontal
   );
 
-  desired.y=THREE.MathUtils.clamp(desired.y,1.05,4.05);
+  desired.y=THREE.MathUtils.clamp(desired.y,.85,5.2);
 
   camera.position.copy(desired);
   camera.lookAt(camTarget);
@@ -3564,7 +3592,7 @@ renderer.domElement.addEventListener('pointermove',e=>{
     const dx=e.clientX-lastX;
     const dy=e.clientY-lastY;
     camYaw-=dx*.006;
-    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,.10,.98);
+    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,-.18,.92);
   }
 
   lastX=e.clientX;
