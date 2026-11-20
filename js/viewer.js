@@ -108,6 +108,27 @@ const SUNSET_PURPLE=new THREE.Color(0x5b2a78);
 const NIGHT_SKY=new THREE.Color(0x08111f);
 const DAY_SUN_COLOR=new THREE.Color(0xffddb5);
 const SUNSET_SUN_COLOR=new THREE.Color(0xff5b21);
+
+const skyGradientCanvas=document.createElement('canvas');
+skyGradientCanvas.width=16;
+skyGradientCanvas.height=256;
+const skyGradientCtx=skyGradientCanvas.getContext('2d');
+const skyGradientTexture=new THREE.CanvasTexture(skyGradientCanvas);
+skyGradientTexture.colorSpace=THREE.SRGBColorSpace;
+skyGradientTexture.minFilter=THREE.LinearFilter;
+skyGradientTexture.magFilter=THREE.LinearFilter;
+skyGradientTexture.generateMipmaps=false;
+
+function updateSkyGradient(topColor,bottomColor){
+  const g=skyGradientCtx.createLinearGradient(0,0,0,skyGradientCanvas.height);
+  g.addColorStop(0,'#'+topColor.getHexString());
+  g.addColorStop(.46,'#'+topColor.clone().lerp(bottomColor,.42).getHexString());
+  g.addColorStop(1,'#'+bottomColor.getHexString());
+  skyGradientCtx.fillStyle=g;
+  skyGradientCtx.fillRect(0,0,skyGradientCanvas.width,skyGradientCanvas.height);
+  skyGradientTexture.needsUpdate=true;
+}
+
 let nightFactor=0;
 let lastNightLightingUpdate=0;
 const skyClouds=[];
@@ -416,7 +437,14 @@ function updateDayNightLighting(force=false){
     sky.lerp(warmSky,Math.min(1,sunsetPhase*1.18));
   }
   sky.lerp(NIGHT_SKY,nightFactor);
-  scene.background=sky;
+
+  const horizon=DAY_SKY.clone();
+  if(sunsetPhase>0){
+    horizon.lerp(new THREE.Color(0xff8a2b),Math.min(1,sunsetPhase*1.15));
+  }
+  horizon.lerp(NIGHT_SKY,nightFactor);
+  updateSkyGradient(sky,horizon);
+  scene.background=skyGradientTexture;
 
   hemi.intensity=THREE.MathUtils.lerp(1.08,.23,nightFactor);
   sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
