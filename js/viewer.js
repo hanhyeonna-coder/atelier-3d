@@ -26,6 +26,7 @@ import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './
 import {createWorkPromptController} from './work-prompt.js';
 import {loadGLB,loadOptionalGLB} from './asset-loader.js';
 import {resolveArtworkExhibitionUntil} from './exhibition-state.js';
+import {getLikeCount,getUserLike,addLike,removeLike} from './likes-api.js';
 
 applyLocaleUI();
 
@@ -2688,16 +2689,11 @@ async function refreshPreviewLikeState(){
   artLikeBtn.style.display='inline-flex';
   artLikeBtn.disabled=false;
 
-  const countQuery=supabase
-    .from('atelier_likes')
-    .select('*',{count:'exact',head:true})
-    .eq('work_id',previewWorkId);
-
   let liked=false;
   const [countRes,ownRes]=await Promise.all([
-    countQuery,
+    getLikeCount(supabase,previewWorkId),
     currentUser
-      ? supabase.from('atelier_likes').select('work_id').eq('work_id',previewWorkId).eq('user_id',currentUser.id).maybeSingle()
+      ? getUserLike(supabase,previewWorkId,currentUser.id)
       : Promise.resolve({data:null,error:null})
   ]);
 
@@ -2790,12 +2786,7 @@ artLikeBtn.addEventListener('click',async ()=>{
   }
 
   artLikeBtn.disabled=true;
-  const {data:existing,error:checkError}=await supabase
-    .from('atelier_likes')
-    .select('work_id')
-    .eq('work_id',previewWorkId)
-    .eq('user_id',currentUser.id)
-    .maybeSingle();
+  const {data:existing,error:checkError}=await getUserLike(supabase,previewWorkId,currentUser.id);
 
   if(checkError){
     console.warn('like lookup',checkError);
@@ -2804,16 +2795,10 @@ artLikeBtn.addEventListener('click',async ()=>{
   }
 
   if(existing){
-    const {error}=await supabase
-      .from('atelier_likes')
-      .delete()
-      .eq('work_id',previewWorkId)
-      .eq('user_id',currentUser.id);
+    const {error}=await removeLike(supabase,previewWorkId,currentUser.id);
     if(error)console.warn('unlike',error);
   }else{
-    const {error}=await supabase
-      .from('atelier_likes')
-      .insert({work_id:previewWorkId,user_id:currentUser.id});
+    const {error}=await addLike(supabase,previewWorkId,currentUser.id);
     if(error)console.warn('like',error);
   }
   await refreshPreviewLikeState();
