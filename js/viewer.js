@@ -907,6 +907,16 @@ function constrainWalkable(next,previous){
   return constrainWalkableByConfig(next,previous,WALKABLE_GEOMETRY);
 }
 
+function bridgeVisualPoint(localX,localZ,y=0){
+  if(!galleryBridgeGroup){
+    return bridgeLocalToWorld(localX,localZ,WALKABLE_GEOMETRY,y);
+  }
+  galleryBridgeGroup.updateMatrixWorld(true);
+  const p=galleryBridgeGroup.localToWorld(new THREE.Vector3(localX,0,localZ));
+  p.y=y;
+  return p;
+}
+
 function pavilionArcWaypoints(from,to,y){
   const points=[];
   const safeRadius=6.6;
@@ -946,22 +956,27 @@ function setMoveRoute(destination){
   const fromZone=walkableZone(avatarRoot.position,WALKABLE_GEOMETRY);
   const toZone=walkableZone(destination,WALKABLE_GEOMETRY);
   const y=avatarRoot.position.y;
-  const bridgeEntry=bridgeLocalToWorld(0,BRIDGE_START_Z+.45,WALKABLE_GEOMETRY,y);
-  const bridgeExit=bridgeLocalToWorld(0,BRIDGE_END_Z-.45,WALKABLE_GEOMETRY,y);
+
+  // Use the actual rendered bridge group's transform, never a duplicated
+  // mathematical transform. This keeps the route exactly on the visible deck.
+  const bridgeEntry=bridgeVisualPoint(0,BRIDGE_START_Z+.55,y);
+  const bridgeExit=bridgeVisualPoint(0,BRIDGE_END_Z-.55,y);
+  const galleryCenter=bridgeVisualPoint(0,GALLERY_CENTER_Z,y);
 
   if(fromZone==='pavilion' && toZone==='gallery'){
     moveWaypoints=[
       ...pavilionArcWaypoints(avatarRoot.position,bridgeEntry,y),
       bridgeExit,
+      galleryCenter,
       destination.clone()
     ];
   }else if(fromZone==='gallery' && toZone==='pavilion'){
     const pavilionTarget=destination.clone();
-    const insideBridge=bridgeEntry.clone();
     moveWaypoints=[
+      galleryCenter,
       bridgeExit,
-      insideBridge,
-      ...pavilionArcWaypoints(insideBridge,pavilionTarget,y)
+      bridgeEntry,
+      ...pavilionArcWaypoints(bridgeEntry,pavilionTarget,y)
     ];
   }else{
     moveWaypoints=[destination.clone()];
@@ -3417,12 +3432,20 @@ function tryMoveOnBridgeOrGallery(){
     );
   }
 
-  const destination=bridgeLocalToWorld(
-    targetLocalX,
-    targetLocalZ,
-    WALKABLE_GEOMETRY,
-    y
-  );
+  // Clamp future-gallery taps to the actual circular lot, then convert
+  // through the rendered group's matrix so the destination is visibly on it.
+  if(targetLocalZ>BRIDGE_END_Z+.6){
+    const dx=targetLocalX;
+    const dz=targetLocalZ-GALLERY_CENTER_Z;
+    const r=Math.hypot(dx,dz);
+    const maxR=5.15;
+    if(r>maxR){
+      targetLocalX=dx/r*maxR;
+      targetLocalZ=GALLERY_CENTER_Z+dz/r*maxR;
+    }
+  }
+
+  const destination=bridgeVisualPoint(targetLocalX,targetLocalZ,y);
 
   releasePlayerSeat();
   setMoveRoute(destination);
@@ -3677,7 +3700,10 @@ function updateMovement(dt){
   }
 
   let next=avatarRoot.position.clone().addScaledVector(dir,step);
-  next=constrainWalkable(next,avatarRoot.position);
+  const followingRoute=!!moveTarget && moveWaypoints.length>0;
+  if(!followingRoute){
+    next=constrainWalkable(next,avatarRoot.position);
+  }
 
   // Do not let the player walk through residents.
   if(playerCandidateBlocked(next)){
