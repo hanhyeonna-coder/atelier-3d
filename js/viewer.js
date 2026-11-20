@@ -472,20 +472,6 @@ function updateDayNightLighting(force=false){
       .lerp(new THREE.Color(0x718092),nightFactor);
   }
 
-  // Give the dome a subtle time-of-day reflection without custom shaders.
-  const glassDay=new THREE.Color('#dfecef');
-  const glassSunset=new THREE.Color('#ffd5bd');
-  const glassNight=new THREE.Color('#b8cae2');
-  for(const glass of atelierGlassMaterials){
-    glass.color.copy(glassDay)
-      .lerp(glassSunset,sunsetFactor*.72)
-      .lerp(glassNight,nightFactor*.58);
-    glass.envMapIntensity=
-      THREE.MathUtils.lerp(1.55,1.95,Math.max(sunsetFactor,nightFactor));
-    glass.opacity=
-      THREE.MathUtils.lerp(.24,.29,Math.max(sunsetFactor,nightFactor));
-  }
-
   updateRegisteredNightLights(nightFactor);
 }
 updateDayNightLighting(true);
@@ -655,7 +641,6 @@ function hasNamedAncestor(o,token){
 }
 
 const animatedWaterMaterials=[];
-const atelierGlassMaterials=[];
 
 function enhanceMaterials(root){
   root.traverse(o=>{
@@ -719,31 +704,25 @@ function enhanceMaterials(root){
           isEaselPart
         ) && !isActualCanvas;
 
-      // GLASS: warm storybook greenhouse glass using only stable built-in material properties.
+      // GLASS: subtle clear greenhouse glass, not a foggy overlay.
       if(isGlass){
         const glass=new THREE.MeshPhysicalMaterial({
-          name:'Atelier Warm Glass',
-          color:new THREE.Color('#dfecef'),
+          name:'Atelier Clear Glass',
+          color:new THREE.Color('#f4fbff'),
           transparent:true,
-          opacity:0.24,
-          transmission:0.34,
-          roughness:0.12,
+          opacity:0.10,
+          transmission:0.22,
+          roughness:0.07,
           metalness:0,
-          ior:1.46,
-          thickness:0.12,
+          ior:1.45,
+          thickness:0.08,
           clearcoat:1,
-          clearcoatRoughness:0.025,
-          envMapIntensity:1.55,
-          attenuationColor:new THREE.Color('#eef9f6'),
-          attenuationDistance:4.5,
+          clearcoatRoughness:0.05,
+          envMapIntensity:0.85,
           side:THREE.DoubleSide,
           depthWrite:false,
           depthTest:true
         });
-
-        glass.userData.baseColor=glass.color.clone();
-        glass.userData.baseEnvMapIntensity=glass.envMapIntensity;
-        atelierGlassMaterials.push(glass);
 
         if(Array.isArray(o.material)){
           o.material[index]=glass;
@@ -751,7 +730,6 @@ function enhanceMaterials(root){
           o.material=glass;
         }
 
-        o.renderOrder=Math.max(o.renderOrder||0,8);
         o.castShadow=false;
         o.receiveShadow=false;
         return;
