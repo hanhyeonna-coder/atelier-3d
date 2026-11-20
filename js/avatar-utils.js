@@ -1,14 +1,5 @@
 import * as THREE from 'three';
 
-export function normalizeAvatarOrientation(model){
-  const rig=model.getObjectByName('AtelierAvatarRig');
-  if(!rig)return;
-  const q=rig.quaternion.clone();
-  const e=new THREE.Euler().setFromQuaternion(q,'YXZ');
-  model.rotation.y-=e.y;
-  model.updateMatrixWorld(true);
-}
-
 export function normalizeAvatarOrigin(model){
   model.updateMatrixWorld(true);
   const box=new THREE.Box3().setFromObject(model);
