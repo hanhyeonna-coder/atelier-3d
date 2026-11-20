@@ -2020,6 +2020,7 @@ function removeArtworkOverlayVisual(seat){
 }
 
 function applyServerArtworks(rows){
+  const now=Date.now();
   const liveRows=(rows||[]).filter(row=>{
     const isLegacyInlineArtwork=
       !row?.work_id &&
@@ -2027,6 +2028,13 @@ function applyServerArtworks(rows){
       row.image_url.startsWith('data:image/');
     if(isLegacyInlineArtwork){
       console.warn('Ignoring legacy inline artwork row',row.seat_index,row.display_name||'');
+      return false;
+    }
+
+    const lockUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
+    const isExpiredExhibition=lockUntil && lockUntil<=now;
+    if(isExpiredExhibition){
+      console.warn('Ignoring expired easel artwork row',row.seat_index,row.display_name||'');
       return false;
     }
     return true;
@@ -3523,7 +3531,7 @@ function makeArtworkOverlay(mesh,img,seat){
   const thin=dims[0].axis;
   let width,height,rot=new THREE.Euler();
   let plus=center.clone(),minus=center.clone();
-  const eps=.008;
+  const eps=.018;
 
   if(thin==='z'){
     width=size.x; height=size.y;
@@ -3560,14 +3568,20 @@ function makeArtworkOverlay(mesh,img,seat){
   const mat=new THREE.MeshBasicMaterial({
     map:tex,
     side:THREE.DoubleSide,
-    toneMapped:false
+    toneMapped:false,
+    transparent:false,
+    depthTest:true,
+    depthWrite:false,
+    polygonOffset:true,
+    polygonOffsetFactor:-4,
+    polygonOffsetUnits:-4
   });
 
   const overlay=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
   overlay.name='Artwork Overlay';
   overlay.position.copy(localPos);
   overlay.rotation.copy(rot);
-  overlay.renderOrder=10;
+  overlay.renderOrder=30;
 
   const old=mesh.getObjectByName('Artwork Overlay');
   if(old){
