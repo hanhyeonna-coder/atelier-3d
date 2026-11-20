@@ -18,6 +18,7 @@ import {supabase,SUPABASE_URL} from './backend.js';
 import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName} from './identity.js';
 import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fetchPresence,deletePresence} from './multiplayer-api.js';
 import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
+import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
 
 applyLocaleUI();
 
@@ -2215,14 +2216,10 @@ async function adoptGuestDataIntoAccount(user){
   ownerId=user.id;
   currentUser=user;
 
-  const {error:adoptError}=await supabase.rpc('atelier_adopt_guest_data',{p_guest_id:clientId});
+  const {error:adoptError}=await adoptGuestData(supabase,clientId);
   if(adoptError)console.warn('guest adoption',adoptError);
 
-  const {data:profile,error:profileError}=await supabase
-    .from('atelier_profiles')
-    .select('*')
-    .eq('user_id',user.id)
-    .maybeSingle();
+  const {data:profile,error:profileError}=await fetchProfile(supabase,user.id);
 
   if(profileError)console.warn('profile lookup',profileError);
 
@@ -2230,18 +2227,13 @@ async function adoptGuestDataIntoAccount(user){
     displayName=makeLocalizedDisplayName(user.id,IS_KO);
     saveDisplayName(displayName);
     if(profile.display_name!==displayName){
-      const {error:profileRenameError}=await supabase
-        .from('atelier_profiles')
-        .update({display_name:displayName})
-        .eq('user_id',user.id);
+      const {error:profileRenameError}=await updateProfileName(supabase,user.id,displayName);
       if(profileRenameError)console.warn('profile localized rename',profileRenameError);
     }
   }else{
     displayName=makeLocalizedDisplayName(user.id,IS_KO);
     saveDisplayName(displayName);
-    const {error:profileInsertError}=await supabase
-      .from('atelier_profiles')
-      .insert({user_id:user.id,display_name:displayName});
+    const {error:profileInsertError}=await createProfile(supabase,user.id,displayName);
     if(profileInsertError && profileInsertError.code!=='23505')console.warn('profile create',profileInsertError);
   }
 
@@ -2275,7 +2267,7 @@ function resetToGuestIdentity(){
 }
 
 async function refreshAuthSession(){
-  const {data:{session}}=await supabase.auth.getSession();
+  const {data:{session}}=await getAuthSession(supabase);
   if(session?.user)await adoptGuestDataIntoAccount(session.user);
   else resetToGuestIdentity();
 }
@@ -2298,12 +2290,9 @@ accountAction.addEventListener('click',async ()=>{
   accountAction.disabled=true;
   accountState.textContent=t('로그인 링크를 보내는 중...','Sending login link...');
 
-  const {error}=await supabase.auth.signInWithOtp({
+  const {error}=await sendMagicLink(supabase,{
     email,
-    options:{
-      shouldCreateUser:true,
-      emailRedirectTo:'https://atelier-3d-gray.vercel.app/viewer.html'
-    }
+    redirectTo:'https://atelier-3d-gray.vercel.app/viewer.html'
   });
 
   if(error){
@@ -2333,7 +2322,7 @@ accountAction.addEventListener('click',async ()=>{
 });
 
 logoutBtn.addEventListener('click',async ()=>{
-  await supabase.auth.signOut();
+  await signOut(supabase);
   resetToGuestIdentity();
   accountModal.classList.remove('show');
   showStatus('로그아웃했어요');
