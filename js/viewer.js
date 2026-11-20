@@ -3265,40 +3265,62 @@ function setClickTarget(clientX,clientY){
   showStatus('이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
 }
 
+let cameraDragActive=false;
+
+renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
+
 renderer.domElement.addEventListener('pointerdown',e=>{
-  if(e.button!==0)return;
-  pointerDown=true;
-  dragged=false;
-  downX=lastX=e.clientX;
-  downY=lastY=e.clientY;
-  renderer.domElement.setPointerCapture?.(e.pointerId);
+  if(e.button===0){
+    // Left click is reserved for movement / interaction only.
+    pointerDown=true;
+    dragged=false;
+    downX=lastX=e.clientX;
+    downY=lastY=e.clientY;
+    renderer.domElement.setPointerCapture?.(e.pointerId);
+    return;
+  }
+
+  if(e.button===2){
+    // Camera orbit is explicit: right-button drag only.
+    cameraDragActive=true;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    renderer.domElement.setPointerCapture?.(e.pointerId);
+  }
 });
 
 renderer.domElement.addEventListener('pointermove',e=>{
-  if(!pointerDown)return;
+  if(!cameraDragActive)return;
 
-  const total=Math.hypot(e.clientX-downX,e.clientY-downY);
-  if(total>7)dragged=true;
-
-  if(dragged){
-    const dx=e.clientX-lastX;
-    const dy=e.clientY-lastY;
-    camYaw-=dx*.006;
-    camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,-.18,.92);
-  }
-
+  const dx=e.clientX-lastX;
+  const dy=e.clientY-lastY;
+  camYaw-=dx*.006;
+  camPitch=THREE.MathUtils.clamp(camPitch+dy*.004,-.18,.92);
   lastX=e.clientX;
   lastY=e.clientY;
 });
 
 renderer.domElement.addEventListener('pointerup',e=>{
-  if(e.button!==0)return;
-
-  if(pointerDown&&!dragged){
-    setClickTarget(e.clientX,e.clientY);
+  if(e.button===0){
+    if(pointerDown){
+      setClickTarget(e.clientX,e.clientY);
+    }
+    pointerDown=false;
+    dragged=false;
+    renderer.domElement.releasePointerCapture?.(e.pointerId);
+    return;
   }
 
+  if(e.button===2){
+    cameraDragActive=false;
+    renderer.domElement.releasePointerCapture?.(e.pointerId);
+  }
+});
+
+renderer.domElement.addEventListener('pointercancel',e=>{
   pointerDown=false;
+  dragged=false;
+  cameraDragActive=false;
   renderer.domElement.releasePointerCapture?.(e.pointerId);
 });
 
