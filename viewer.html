@@ -2020,7 +2020,18 @@ function removeArtworkOverlayVisual(seat){
 }
 
 function applyServerArtworks(rows){
-  const bySeat=new Map(rows.map(r=>[r.seat_index,r]));
+  const liveRows=(rows||[]).filter(row=>{
+    const isLegacyInlineArtwork=
+      !row?.work_id &&
+      typeof row?.image_url==='string' &&
+      row.image_url.startsWith('data:image/');
+    if(isLegacyInlineArtwork){
+      console.warn('Ignoring legacy inline artwork row',row.seat_index,row.display_name||'');
+      return false;
+    }
+    return true;
+  });
+  const bySeat=new Map(liveRows.map(r=>[r.seat_index,r]));
 
   for(const seat of seatSlots){
     const row=bySeat.get(seat.index);
@@ -3399,6 +3410,12 @@ artModal.addEventListener('click',e=>{
   if(e.target===artModal)closeArtworkPreview();
 });
 
+function isLegacyInlineArtworkSeat(seat){
+  const url=seat?.userData?.artworkDataUrl;
+  const workId=seat?.userData?.workId;
+  return !workId && typeof url==='string' && url.startsWith('data:image/');
+}
+
 function seatHasVisibleArtwork(seat){
   if(!seat)return false;
   return getCanvasMeshesForSeat(seat).some(mesh=>{
@@ -3413,7 +3430,12 @@ function openArtworkPickerForSeat(seat){
     return true;
   }
 
-  if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId && seatHasVisibleArtwork(seat)){
+  if(
+    seat.serverArtworkOwner &&
+    seat.serverArtworkOwner!==ownerId &&
+    seatHasVisibleArtwork(seat) &&
+    !isLegacyInlineArtworkSeat(seat)
+  ){
     showStatus('다른 사람의 작품은 수정할 수 없어요');
     return true;
   }
