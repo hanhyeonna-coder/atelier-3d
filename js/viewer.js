@@ -1000,10 +1000,510 @@ function logEaselClampDiagnostics(root){
     const on=normalizedAssetName(o.name);
     if(!(on.includes('easel') && on.includes('clamp')))return;
     const mats=Array.isArray(o.material)?o.material:[o.material];
-    rows.push({object:o.name||'',normalized:on,materials:mats.map(m=>m?.name||''),colors:mats.map(m=>m?.color?('#'+m.color.getHexString()):'')});
+    rows.push({
+      object:o.name||'',
+      normalized:on,
+      materials:mats.map(m=>m?.name||''),
+      colors:mats.map(m=>m?.color?('#'+m.color.getHexString()):'')
+    });
   });
   console.table(rows);
   window.__easelClampDiagnostics=rows;
+}
+
+function repairFurnitureExport(root){
+  if(!root)return;
+
+  // Blender export currently contains 10 stool transform groups,
+  // but mesh children only under one source group. Clone that stool
+  // geometry into the remaining empty transform groups.
+  const stoolGroups=[];
+  root.children.forEach(o=>{
+    if(normalizedAssetName(o.name).startsWith('stool group 01'))stoolGroups.push(o);
+  });
+
+  const source=stoolGroups.find(g=>{
+    let hasMesh=false;
+    g.traverse(o=>{if(o.isMesh)hasMesh=true;});
+    return hasMesh;
+  });
+
+  if(source){
+    for(const target of stoolGroups){
+      if(target===source)continue;
+      let hasMesh=false;
+      target.traverse(o=>{if(o.isMesh)hasMesh=true;});
+      if(hasMesh)continue;
+
+      for(const child of source.children){
+        const clone=child.clone(true);
+        clone.name=(child.name||'Stool Part')+'__clone_'+target.name;
+        clone.traverse(o=>{
+          if(o.isMesh && o.material){
+            if(Array.isArray(o.material))o.material=o.material.map(m=>m?.clone?.()||m);
+            else o.material=o.material.clone?.()||o.material;
+          }
+        });
+        target.add(clone);
+      }
+    }
+  }
+
+  root.updateMatrixWorld(true);
+}
+
+function forceNamedClampMaterials(root){
+  if(!root)return;
+  root.traverse(o=>{
+    if(!o.isMesh)return;
+    const n=normalizedAssetName(o.name);
+    if(!/^easel\s+\d+\s+clamp(?:\s+\d+)?$/.test(n))return;
+
+    const mat=new THREE.MeshStandardMaterial({
+      name:'Atelier Dark Oak Clamp',
+      color:new THREE.Color('#4f2b1b'),
+      roughness:.62,
+      metalness:0,
+      transparent:false,
+      opacity:1,
+      depthWrite:true,
+      side:THREE.FrontSide
+    });
+    o.material=mat;
+    o.castShadow=true;
+    o.receiveShadow=true;
+    o.userData.atelierClampFixed=true;
+  });
+}
+
+function forceEaselWoodMaterials(root){
+  if(!root)return;
+
+  root.traverse(mesh=>{
+    if(!mesh.isMesh || !mesh.material)return;
+
+    const objectName=normalizedAssetName(mesh.name);
+    const source=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+
+    const fixed=source.map(mat=>{
+      if(!mat)return mat;
+      const materialName=normalizedAssetName(mat.name);
+
+      const isNamedEaselClamp=/^easel\s+\d+\s+clamp(?:\s+\d+)?$/.test(objectName);
+
+      const forceWood=
+        materialName==='dark oak' ||
+        materialName==='warm oak' ||
+        isNamedEaselClamp ||
+        objectName.includes('clip') ||
+        objectName.includes('holder') ||
+        objectName.includes('support') ||
+        objectName.includes('easel');
+
+      const isActualCanvas=
+        objectName.includes('canvas') ||
+        objectName.includes('painting') ||
+        objectName.includes('artwork') ||
+        (materialName.includes('canvas') && !forceWood);
+
+      if(isActualCanvas)return mat;
+      if(!forceWood)return mat;
+
+      const m=mat.clone();
+      if(m.color)m.color.set('#6f4228');
+      if('roughness' in m)m.roughness=.58;
+      if('metalness' in m)m.metalness=0;
+      if('transmission' in m)m.transmission=0;
+      m.transparent=false;
+      m.opacity=1;
+      m.depthWrite=true;
+      m.needsUpdate=true;
+      return m;
+    });
+
+    mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
+  });
+}
+function forceEaselTopClampsByGeometry(root){
+  if(!root)return;
+
+  const easels=collectNamedRoots(root,o=>/^easel\s+\d+$/.test(normalizedAssetName(o.name)));
+  for(const easel of easels){
+    easel.updateMatrixWorld(true);
+
+    const meshes=[];
+    easel.traverse(o=>{ if(o.isMesh && o.material)meshes.push(o); });
+    if(!meshes.length)continue;
+
+    const canvasCandidates=meshes.filter(o=>{
+      const on=normalizedAssetName(o.name);
+      const mats=Array.isArray(o.material)?o.material:[o.material];
+      return on.includes('canvas') || mats.some(m=>normalizedAssetName(m?.name).includes('canvas'));
+    });
+    if(!canvasCandidates.length)continue;
+
+    canvasCandidates.sort((a,b)=>{
+      const sa=new THREE.Box3().setFromObject(a).getSize(new THREE.Vector3());
+      const sb=new THREE.Box3().setFromObject(b).getSize(new THREE.Vector3());
+      return (sb.x*sb.y+sb.x*sb.z+sb.y*sb.z)-(sa.x*sa.y+sa.x*sa.z+sa.y*sa.z);
+    });
+    const canvas=canvasCandidates[0];
+    const cbox=new THREE.Box3().setFromObject(canvas);
+    const ccenter=cbox.getCenter(new THREE.Vector3());
+    const csize=cbox.getSize(new THREE.Vector3());
+
+    for(const mesh of meshes){
+      if(mesh===canvas)continue;
+      const box=new THREE.Box3().setFromObject(mesh);
+      const center=box.getCenter(new THREE.Vector3());
+      const size=box.getSize(new THREE.Vector3());
+
+      const isAboveCanvas=
+        center.y > cbox.max.y - csize.y*.08 &&
+        center.y < cbox.max.y + csize.y*.28;
+      const horizontallyAligned=
+        Math.abs(center.x-ccenter.x) < Math.max(csize.x,csize.z)*.42 &&
+        Math.abs(center.z-ccenter.z) < Math.max(csize.x,csize.z)*.42;
+      const isSmall=
+        Math.max(size.x,size.y,size.z) < Math.max(csize.x,csize.y,csize.z)*.30;
+
+      if(!(isAboveCanvas && horizontallyAligned && isSmall))continue;
+
+      const source=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+      const fixed=source.map(mat=>{
+        if(!mat)return mat;
+        const m=mat.clone();
+        if(m.color)m.color.set('#6f4228');
+        if('roughness' in m)m.roughness=.58;
+        if('metalness' in m)m.metalness=0;
+        if('transmission' in m)m.transmission=0;
+        m.transparent=false;
+        m.opacity=1;
+        m.depthWrite=true;
+        m.needsUpdate=true;
+        return m;
+      });
+      mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
+      mesh.userData.atelierClampFixed=true;
+    }
+  }
+}
+
+function keepOnlyFurniture(root){
+  root.traverse(o=>{
+    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    const keep=
+      n.includes('easel') ||
+      n.includes('stool') ||
+      n.includes('canvas') ||
+      hasNamedAncestor(o,'easel') ||
+      hasNamedAncestor(o,'stool');
+
+    if(o.isMesh)o.visible=!!keep;
+  });
+}
+
+function keepOnlyFlowers(root){
+  // Show the dedicated flower GLB and restore the intended Lower Flower tilt.
+  // Blender's -90° lower-flower orientation is not surviving the glTF/web axis conversion reliably.
+  root.traverse(o=>{
+    o.visible=true;
+    if(o.isMesh)o.frustumCulled=false;
+  });
+
+  // Rotate only top-level Lower Flower roots so children are not rotated twice.
+  const lowerRoots=[];
+  root.traverse(o=>{
+    if(o===root)return;
+    const n=(o.name||'').toLowerCase();
+    if(!n.includes('lower flower'))return;
+
+    let p=o.parent;
+    while(p && p!==root){
+      if((p.name||'').toLowerCase().includes('lower flower'))return;
+      p=p.parent;
+    }
+    lowerRoots.push(o);
+  });
+
+  lowerRoots.forEach(o=>{
+    o.rotation.x=-Math.PI/2;
+  });
+
+  root.updateMatrixWorld(true);
+}
+
+function keepFurnitureInsidePavilion(furnitureRoot){
+  const roots=[];
+
+  furnitureRoot.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    const normalized=normalizedAssetName(o.name);
+    const isCandidate=/^easel\s+\d+$/.test(normalized) || n.includes('stool_group') || n.startsWith('stool');
+    if(!isCandidate)return;
+
+    let p=o.parent;
+    while(p && p!==furnitureRoot){
+      const pn=(p.name||'').toLowerCase();
+      const pNormalized=normalizedAssetName(p.name);
+      if(/^easel\s+\d+$/.test(pNormalized) || pn.includes('stool_group') || pn.startsWith('stool'))return;
+      p=p.parent;
+    }
+    roots.push(o);
+  });
+
+  roots.forEach(root=>{
+    const box=new THREE.Box3().setFromObject(root);
+    if(box.isEmpty())return;
+    const center=box.getCenter(new THREE.Vector3());
+    const r=Math.hypot(center.x,center.z);
+    const maxR=7.55;
+
+    if(r>maxR){
+      const target=center.clone().multiplyScalar(maxR/r);
+      const delta=new THREE.Vector3(target.x-center.x,0,target.z-center.z);
+      root.position.add(delta);
+      root.updateMatrixWorld(true);
+    }
+  });
+}
+
+function collectSeatSlots(furnitureRoot){
+  seatSlots.length=0;
+
+  const stoolRoots=[];
+  const easels=[];
+
+  furnitureRoot.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+
+    if(n.includes('stool_group') || n.startsWith('stool')){
+      let p=o.parent;
+      while(p && p!==furnitureRoot){
+        const pn=(p.name||'').toLowerCase();
+        if(pn.includes('stool_group') || pn.startsWith('stool'))return;
+        p=p.parent;
+      }
+      stoolRoots.push(o);
+      return;
+    }
+
+    const normalized=normalizedAssetName(o.name);
+    const isEaselRoot=/^easel\s+\d+$/.test(normalized);
+
+    if(isEaselRoot){
+      let p=o.parent;
+      while(p && p!==furnitureRoot){
+        const pn=normalizedAssetName(p.name);
+        if(/^easel\s+\d+$/.test(pn))return;
+        p=p.parent;
+      }
+
+      const box=new THREE.Box3().setFromObject(o);
+      if(!box.isEmpty()){
+        easels.push({
+          o,
+          center:box.getCenter(new THREE.Vector3())
+        });
+      }
+    }
+  });
+
+  // Match each stool to the closest easel, then place the stool consistently
+  // on the pavilion-center side of that easel.
+  console.log('Seat easel roots:',easels.map(e=>e.o.name));
+  const unused=[...easels];
+
+  stoolRoots.forEach((stool,index)=>{
+    const stoolBox=new THREE.Box3().setFromObject(stool);
+    if(stoolBox.isEmpty())return;
+    const stoolCenter=stoolBox.getCenter(new THREE.Vector3());
+
+    let nearestIndex=-1;
+    let nearestD=Infinity;
+    unused.forEach((e,i)=>{
+      const d=(e.center.x-stoolCenter.x)**2+(e.center.z-stoolCenter.z)**2;
+      if(d<nearestD){nearestD=d;nearestIndex=i;}
+    });
+
+    if(nearestIndex<0)return;
+    const easel=unused.splice(nearestIndex,1)[0];
+
+    // From easel toward pavilion center = where the sitter should be.
+    const inward=new THREE.Vector3(-easel.center.x,0,-easel.center.z);
+    if(inward.lengthSq()<0.0001)inward.set(0,0,1);
+    inward.normalize();
+
+    // Desired stool center is ~0.95 m inward from the easel.
+    const desiredCenter=easel.center.clone().addScaledVector(inward,0.95);
+    const delta=new THREE.Vector3(
+      desiredCenter.x-stoolCenter.x,
+      0,
+      desiredCenter.z-stoolCenter.z
+    );
+    stool.position.add(delta);
+    stool.updateMatrixWorld(true);
+
+    // Recompute final stool center after moving it.
+    const finalBox=new THREE.Box3().setFromObject(stool);
+    const finalCenter=finalBox.getCenter(new THREE.Vector3());
+
+    const faceDir=new THREE.Vector3(
+      easel.center.x-finalCenter.x,
+      0,
+      easel.center.z-finalCenter.z
+    ).normalize();
+
+    const floorY=avatarRoot?.position.y ?? 0;
+    const seat={
+      index,
+      stool,
+      easel:easel.o,
+      easelCenter:easel.center.clone(),
+      position:new THREE.Vector3(finalCenter.x,floorY,finalCenter.z),
+      seatTop:finalBox.max.y,
+      faceDir,
+      occupiedBy:null,
+      artworkLockedUntil:0,
+      serverOccupant:null,
+      serverArtworkOwner:null,
+      clickRadius:0.95
+    };
+
+    stool.traverse(child=>{child.userData.seatSlot=seat;});
+    stool.userData.seatSlot=seat;
+    easel.o.traverse(child=>{child.userData.seatSlot=seat;});
+    easel.o.userData.seatSlot=seat;
+    seatSlots.push(seat);
+  });
+
+  seatSlots.sort((a,b)=>Math.atan2(a.position.x,a.position.z)-Math.atan2(b.position.x,b.position.z));
+  console.log('Seat slots aligned to easels:',seatSlots.length);
+}
+
+function makeNPCActionSet(model,clips){
+  const mixer=new THREE.AnimationMixer(model);
+  const actions={};
+  clips.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
+  return {mixer,actions,current:null};
+}
+
+function playNPC(npc,name,fade=.14){
+  const next=npc.actions[name];
+  if(!next)return;
+
+  if(npc.current===next){
+    if(!next.isRunning())next.reset().play();
+    return;
+  }
+
+  next.enabled=true;
+  next.clampWhenFinished=false;
+  next.setLoop(THREE.LoopRepeat,Infinity);
+  next.reset().play();
+  if(npc.current)npc.current.crossFadeTo(next,fade,false);
+  npc.current=next;
+}
+
+function isInsideCenterBlock(pos,margin=0){
+  return Math.hypot(pos.x,pos.z)<(CENTER_BLOCK_RADIUS+margin);
+}
+
+function randomWalkTarget(exceptNPC=null){
+  for(let tries=0;tries<50;tries++){
+    const radius=THREE.MathUtils.lerp(3.15,7.25,Math.sqrt(Math.random()));
+    const a=Math.random()*Math.PI*2;
+    const p=new THREE.Vector3(Math.sin(a)*radius,0,Math.cos(a)*radius);
+
+    let blocked=isInsideCenterBlock(p,.35);
+    for(const n of npcs){
+      if(n===exceptNPC)continue;
+      if(n.root.position.distanceTo(p)<1.25){blocked=true;break;}
+    }
+    if(!blocked&&avatarRoot&&avatarRoot.position.distanceTo(p)<1.1)blocked=true;
+    if(!blocked)return p;
+  }
+  return new THREE.Vector3(3.6,0,0);
+}
+
+function releaseSeat(npc){
+  if(npc.seat){
+    if(npc.seat.occupiedBy===npc)npc.seat.occupiedBy=null;
+    npc.seat=null;
+  }
+}
+
+function reserveRandomSeat(npc){
+  const free=seatSlots.filter(s=>!s.occupiedBy && !s.serverOccupant && !isArtworkLocked(s));
+  if(!free.length)return false;
+  const seat=free[Math.floor(Math.random()*free.length)];
+  seat.occupiedBy=npc;
+  npc.seat=seat;
+  npc.target=seat.position.clone();
+  npc.state='goingToSeat';
+  playNPC(npc,'Avatar_Walk');
+  return true;
+}
+
+function placeNPCSeated(npc,seat){
+  seat.occupiedBy=npc;
+  npc.seat=seat;
+  npc.root.position.copy(seat.position);
+  npc.root.rotation.y=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
+  npc.state='seated';
+  npc.stateUntil=performance.now()/1000+THREE.MathUtils.randFloat(7,15);
+  playNPC(npc,npc.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit',0);
+}
+
+function spawnNPCs(baseModel,clips,count=NPC_COUNT){
+  npcs.splice(0,npcs.length);
+
+  for(let i=0;i<count;i++){
+    const root=new THREE.Group();
+    const model=SkeletonUtils.clone(baseModel);
+    isolateAvatarMaterials(model);
+    root.add(model);
+
+    const {mixer,actions,current}=makeNPCActionSet(model,clips);
+    const npc={
+      id:i,
+      root,
+      model,
+      mixer,
+      actions,
+      current,
+      state:'idle',
+      stateUntil:0,
+      target:null,
+      seat:null,
+      speed:THREE.MathUtils.randFloat(1.0,1.45)
+    };
+
+    const color=hatColorPool[(hatColorPool.length-1-i+hatColorPool.length)%hatColorPool.length];
+    npc.hatColor=color;
+    recolorBeret(model,color);
+
+    root.position.copy(randomWalkTarget(npc));
+    scene.add(root);
+    npcs.push(npc);
+    playNPC(npc,'Avatar_Idle',0);
+  }
+
+  // Make the room immediately feel occupied: two residents begin seated,
+  // the rest start at separated roaming locations.
+  const freeSeats=seatSlots.filter(s=>!s.serverOccupant && !isArtworkLocked(s));
+  for(let i=0;i<Math.min(2,npcs.length,freeSeats.length);i++){
+    const idx=Math.floor(Math.random()*freeSeats.length);
+    const seat=freeSeats.splice(idx,1)[0];
+    placeNPCSeated(npcs[i],seat);
+  }
+
+  for(let i=2;i<npcs.length;i++){
+    npcs[i].target=randomWalkTarget(npcs[i]);
+    npcs[i].state='walking';
+    playNPC(npcs[i],'Avatar_Walk',0);
+  }
 }
 
 function npcCandidateBlocked(npc,candidate,minDistance=NPC_MIN_DISTANCE){
