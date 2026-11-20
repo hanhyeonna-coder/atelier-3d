@@ -3956,8 +3956,68 @@ function makeCloudPuffTexture(){
   return tex;
 }
 
+let mobileCloudTexture=null;
+
+function makeMobileCloudTexture(){
+  if(mobileCloudTexture)return mobileCloudTexture;
+  const canvas=document.createElement('canvas');
+  canvas.width=512;
+  canvas.height=256;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const blobs=[
+    [92,148,76],
+    [160,118,94],
+    [250,104,112],
+    [345,120,92],
+    [420,150,70],
+    [215,160,96],
+    [305,162,90]
+  ];
+
+  for(const [x,y,r] of blobs){
+    const g=ctx.createRadialGradient(x,y,r*.12,x,y,r);
+    g.addColorStop(0,'rgba(255,255,255,1)');
+    g.addColorStop(.58,'rgba(255,255,255,.96)');
+    g.addColorStop(.82,'rgba(255,255,255,.72)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  tex.generateMipmaps=false;
+  tex.needsUpdate=true;
+  mobileCloudTexture=tex;
+  return tex;
+}
+
 function createCloudGroup(puffTexture,scale=1){
   const group=new THREE.Group();
+
+  // iOS/WebView can produce noisy color artifacts when several transparent
+  // canvas sprites overlap. Use one precomposed cloud sprite on mobile.
+  if(IS_MOBILE_RENDER){
+    const mat=new THREE.SpriteMaterial({
+      map:makeMobileCloudTexture(),
+      transparent:true,
+      depthWrite:false,
+      depthTest:true,
+      opacity:.96,
+      color:0xffffff
+    });
+    const cloud=new THREE.Sprite(mat);
+    cloud.scale.set(5.4*scale,2.7*scale,1);
+    group.add(cloud);
+    return group;
+  }
+
   const puffMat=new THREE.SpriteMaterial({
     map:puffTexture,
     transparent:true,
