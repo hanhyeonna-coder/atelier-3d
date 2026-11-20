@@ -20,7 +20,7 @@ import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSessi
 import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
 import {formatDuration,formatTodayWork,formatLocalDate} from './time-format.js';
 import {normalizeAvatarOrigin,isolateAvatarMaterials,recolorBeret} from './avatar-utils.js';
-import {constrainWalkable as constrainWalkableByConfig,isWalkableWorldPosition as isWalkableByConfig,facingYaw} from './movement-geometry.js';
+import {constrainWalkable as constrainWalkableByConfig,isWalkableWorldPosition as isWalkableByConfig,walkableZone,bridgeLocalToWorld,facingYaw} from './movement-geometry.js';
 import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
 import {createWorkPromptController} from './work-prompt.js';
@@ -501,6 +501,7 @@ let avatarMixer=null;
 const avatarActions={};
 let currentAction=null;
 let moveTarget=null;
+let moveWaypoints=[];
 let pendingPlayerSeat=null;
 let playerSeat=null;
 let mySeat=null;
@@ -903,6 +904,33 @@ function isWalkableWorldPosition(position){
 
 function constrainWalkable(next,previous){
   return constrainWalkableByConfig(next,previous,WALKABLE_GEOMETRY);
+}
+
+function setMoveRoute(destination){
+  moveWaypoints=[];
+  if(!avatarRoot){
+    moveTarget=destination;
+    return;
+  }
+
+  const fromZone=walkableZone(avatarRoot.position,WALKABLE_GEOMETRY);
+  const toZone=walkableZone(destination,WALKABLE_GEOMETRY);
+  const y=avatarRoot.position.y;
+  const bridgeEntry=bridgeLocalToWorld(0,BRIDGE_START_Z+.45,WALKABLE_GEOMETRY,y);
+  const bridgeExit=bridgeLocalToWorld(0,BRIDGE_END_Z-.45,WALKABLE_GEOMETRY,y);
+
+  if(fromZone==='pavilion' && toZone==='gallery'){
+    moveWaypoints=[bridgeEntry,bridgeExit,destination.clone()];
+  }else if(fromZone==='gallery' && toZone==='pavilion'){
+    moveWaypoints=[bridgeExit,bridgeEntry,destination.clone()];
+  }else{
+    moveWaypoints=[destination.clone()];
+  }
+  moveTarget=moveWaypoints.shift()||null;
+}
+
+function advanceMoveRoute(){
+  moveTarget=moveWaypoints.shift()||null;
 }
 
 function logEaselClampDiagnostics(root){
@@ -3358,7 +3386,7 @@ function setClickTarget(clientX,clientY){
   }
 
   releasePlayerSeat();
-  moveTarget=new THREE.Vector3(hit.x,avatarRoot.position.y,hit.z);
+  setMoveRoute(new THREE.Vector3(hit.x,avatarRoot.position.y,hit.z));
   playAvatar('Avatar_Walk');
   showStatus(t('이동 중 → ','Walking → ')+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
 }
@@ -3496,6 +3524,7 @@ function updateMovement(dt){
   if(manual){
     releasePlayerSeat();
     moveTarget=null;
+    moveWaypoints=[];
 
     // Camera-relative controls from the ACTUAL rendered camera.
     const forward=new THREE.Vector3();
@@ -3516,6 +3545,14 @@ function updateMovement(dt){
     if(distance<.09){
       avatarRoot.position.x=moveTarget.x;
       avatarRoot.position.z=moveTarget.z;
+
+      if(moveWaypoints.length && !pendingPlayerSeat){
+        advanceMoveRoute();
+        if(moveTarget){
+          playAvatar('Avatar_Walk');
+          return;
+        }
+      }
       moveTarget=null;
 
       if(pendingPlayerSeat){
@@ -3561,6 +3598,7 @@ function updateMovement(dt){
   // Do not let the player walk through residents.
   if(playerCandidateBlocked(next)){
     if(moveTarget)moveTarget=null;
+    moveWaypoints=[];
     playAvatar('Avatar_Idle');
     return;
   }
