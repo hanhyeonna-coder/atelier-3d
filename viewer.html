@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>좀쓰화실 DEBUG 02</title>
+<title>좀쓰화실</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
@@ -88,20 +88,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #artLikeBtn:disabled{opacity:.45;cursor:default}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 
-#runtimeDebug{
-  position:fixed;left:10px;bottom:10px;z-index:99999;
-  background:rgba(178,32,32,.94);color:#fff;
-  padding:8px 10px;border-radius:8px;
-  font:700 11px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
-  box-shadow:0 3px 12px rgba(0,0,0,.35);
-  pointer-events:none;white-space:pre;
-}
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div id="runtimeDebug">DEBUG 02
-booting…</div>
 <div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <div id="topActions">
@@ -1411,6 +1401,25 @@ function recolorBeret(model,color){
     material:p.mat.name||''
   })), targetColor.getHexString());
 }
+function logEaselClampDiagnostics(root){
+  if(!root)return;
+  const rows=[];
+  root.traverse(o=>{
+    if(!o.isMesh || !o.material)return;
+    const on=normalizedAssetName(o.name);
+    if(!(on.includes('easel') && on.includes('clamp')))return;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    rows.push({
+      object:o.name||'',
+      normalized:on,
+      materials:mats.map(m=>m?.name||''),
+      colors:mats.map(m=>m?.color?('#'+m.color.getHexString()):'')
+    });
+  });
+  console.table(rows);
+  window.__easelClampDiagnostics=rows;
+}
+
 function forceEaselWoodMaterials(root){
   if(!root)return;
 
@@ -4263,6 +4272,7 @@ Promise.all([
     enhanceMaterials(furnitureGLB.scene);
     forceEaselWoodMaterials(furnitureGLB.scene);
     forceEaselTopClampsByGeometry(furnitureGLB.scene);
+    logEaselClampDiagnostics(furnitureGLB.scene);
 
     scene.add(furnitureGLB.scene);
     keepFurnitureInsidePavilion(furnitureGLB.scene);
