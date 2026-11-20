@@ -109,5 +109,9 @@ export function createWorkPromptController(scene){
     sprite.visible=true;
   }
 
-  return {update,hide};
+  function hitTest(raycaster){
+    return !!(sprite?.visible && raycaster.intersectObject(sprite,false).length);
+  }
+
+  return {update,hide,hitTest};
 }
