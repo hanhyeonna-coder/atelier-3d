@@ -39,23 +39,35 @@ export const IS_KO=(navigator.language||'').toLowerCase().startsWith('ko');
 export const t=(ko,en)=>IS_KO?ko:en;
 
 export function applyLocaleUI(){
+  document.documentElement.lang=IS_KO?'ko':'en';
+  document.title=t('좀비 화실','Zombie Atelier');
   controlHint.textContent=t(
     '클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동',
-    'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
+    'Click to move or sit · Drag to look around · Scroll to zoom · WASD/arrow keys to move'
   );
-  historyBtn.textContent=t('내 그림 진행 기록','My Art Progress');
+  historyBtn.textContent=t('내 그림 진행 기록','My Work');
   accountBtn.textContent='👤';
-  accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
+  accountBtn.setAttribute('aria-label',t('내 계정','My account'));
+  accountBtn.title=t('내 계정','My account');
+  accountTitle.textContent=t('내 좀비 화실 계정','My Zombie Atelier Account');
   accountDesc.textContent=t(
     '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
-    'Log in by email to continue the same artwork progress across devices.'
+    'Sign in with your email to keep the same artwork history across your phone and computer.'
   );
-  accountAction.textContent=t('로그인 링크 받기','Send login link');
-  historySummary.textContent=t('현재 작품 진행 과정','Current artwork progress');
-  completeWorkBtn.textContent=t('작품 완성하고 보관하기','Complete & archive');
-  deleteCurrentWorkBtn.textContent=t('이 작품 폐기하기','Discard this artwork');
-  completedTitle.textContent=t('완성 작품 보관함','Completed artworks');
-  artPreview.alt=t('작품 크게 보기','Artwork preview');
+  accountEmail.placeholder=t('이메일 주소','Email address');
+  accountAction.textContent=t('로그인 링크 받기','Email me a sign-in link');
+  logoutBtn.textContent=t('로그아웃','Sign out');
+  historySummary.textContent=t('현재 작품 진행 과정','Current work in progress');
+  completeWorkBtn.textContent=t('작품 완성하고 보관하기','Mark as finished');
+  deleteCurrentWorkBtn.textContent=t('이 작품 폐기하기','Discard this work');
+  completedTitle.textContent=t('완성 작품 보관함','Finished works');
+  artArchiveTitle.textContent=t('완성 작품 보관함','Finished works');
+  artPreview.alt=t('작품 크게 보기','Large artwork preview');
+  artClose.setAttribute('aria-label',t('닫기','Close'));
+  historyClose.setAttribute('aria-label',t('닫기','Close'));
+  accountClose.setAttribute('aria-label',t('닫기','Close'));
+  const likeLabel=artLikeBtn.querySelector('.label');
+  if(likeLabel)likeLabel.textContent=t('좋아요','Like');
 }
 
 let statusHideTimer=null;
