@@ -18,7 +18,7 @@ import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fe
 import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
 import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
 import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
-import {formatDuration,formatTodayWork} from './time-format.js';
+import {formatDuration,formatTodayWork,formatLocalDate} from './time-format.js';
 import {normalizeAvatarOrigin,isolateAvatarMaterials,recolorBeret} from './avatar-utils.js';
 import {constrainWalkable as constrainWalkableByConfig,isWalkableWorldPosition as isWalkableByConfig,facingYaw} from './movement-geometry.js';
 import {makeArtworkOverlay} from './artwork-render.js';
@@ -31,14 +31,14 @@ import {getLikeCount,getUserLike,addLike,removeLike} from './likes-api.js';
 applyLocaleUI();
 
 const loadingCopiesKo=[
-  '좀쓰 화실에 온 걸 환영한다',
+  '좀비 화실에 온 걸 환영한다',
   '조금이라도 그려라, 그리고 흔적 남겨라',
   '자신있게 올려! 넌 화가야!'
 ];
 const loadingCopiesEn=[
-  'Welcome to Jomss Atelier',
-  'Draw something, even a little. Leave your mark.',
-  'Post it with confidence! You are an artist!'
+  'Welcome to Zombie Atelier',
+  'Draw something—even a little. Leave your mark.',
+  'Post it with confidence. You’re an artist.'
 ];
 let loadingCopyIndex=0;
 const loadingCopies=IS_KO?loadingCopiesKo:loadingCopiesEn;
@@ -454,7 +454,8 @@ let activeWorkId=null;
 let activeWorkCoverUrl=null;
 let blockedPromptSeat=null;
 let blockedPromptUntil=0;
-const WORK_PROMPTS=['작업 중...','오늘 작업한 그림을 올려볼까요?'];
+const WORK_PROMPTS=IS_KO?['작업 중...','오늘 작업한 그림을 올려볼까요?']:['Work in progress...','Want to post what you worked on today?'];
+const ACTIVE_WORK_PROMPTS=IS_KO?['작업 중...','그림 바꾸기']:['Work in progress...','Replace artwork'];
 let furnitureScene=null;
 
 // NPC atelier residents.
@@ -1517,7 +1518,7 @@ function applyServerArtworks(rows){
     // Always keep server artwork identity on the seat, including my own row.
     // This is required after a work is completed: the exhibition remains visible,
     // while activeWorkId is cleared, so clicking must still resolve the completed work.
-    seat.userData.artworkMeta=(row.display_name||'Painter')+' · '+t('작업 ','work ')+Math.max(1,Math.round((row.work_seconds||0)/60))+t('분',' min');
+    seat.userData.artworkMeta=(row.display_name||'Painter')+' · '+t('작업 ','Worked ')+Math.max(1,Math.round((row.work_seconds||0)/60))+t('분',' min');
     seat.userData.workId=row.work_id||null;
     if(row.image_url)seat.userData.artworkDataUrl=row.image_url;
 
@@ -1616,7 +1617,7 @@ function ensureRemoteAvatar(id,state={}){
     window.__atelierAvatarClips?.forEach(clip=>actions[clip.name]=mixer.clipAction(clip));
     scene.add(root);
     entry={clientId:id,root,model,mixer,actions,current:null,targetPosition:new THREE.Vector3(),targetYaw:0,lastMotionAt:0,displayName:state.displayName||null,lastGreetingAt:0,seatIndex:null};
-    setAvatarNameLabel(root,state.displayName||'이름 없는 화가');
+    setAvatarNameLabel(root,state.displayName||t('이름 없는 화가','Unnamed artist'));
     const initialLabel=root.getObjectByName('Player Name Label');
     if(initialLabel)initialLabel.visible=false;
     remoteAvatars.set(id,entry);
@@ -1961,7 +1962,7 @@ async function adoptGuestDataIntoAccount(user){
   accountEmail.style.display='none';
   accountAction.style.display='none';
   logoutBtn.style.display='block';
-  accountState.textContent=IS_KO ? `${user.email||'로그인됨'} · 작품 기록이 이 계정에 저장돼요.` : `${user.email||'Logged in'} · Artwork progress is saved to this account.`;
+  accountState.textContent=IS_KO ? `${user.email||'로그인됨'} · 작품 기록이 이 계정에 저장돼요.` : `${user.email||'Signed in'} · Your artwork history is saved to this account.`;
 }
 
 function resetToGuestIdentity(){
@@ -1973,7 +1974,7 @@ function resetToGuestIdentity(){
   accountEmail.style.display='block';
   accountAction.style.display='block';
   logoutBtn.style.display='none';
-  accountState.textContent=t('로그인하면 다른 기기에서도 같은 기록을 이어볼 수 있어요.','Log in to continue the same progress across devices.');
+  accountState.textContent=t('로그인하면 다른 기기에서도 같은 기록을 이어볼 수 있어요.','Sign in to keep the same artwork history across devices.');
 }
 
 async function refreshAuthSession(){
@@ -1998,7 +1999,7 @@ accountAction.addEventListener('click',async ()=>{
   }
 
   accountAction.disabled=true;
-  accountState.textContent=t('로그인 링크를 보내는 중...','Sending login link...');
+  accountState.textContent=t('로그인 링크를 보내는 중...','Sending your sign-in link...');
 
   const {error}=await sendMagicLink(supabase,{
     email,
@@ -2009,17 +2010,17 @@ accountAction.addEventListener('click',async ()=>{
     accountAction.disabled=false;
     console.warn('magic link',error);
     if(error.code==='over_email_send_rate_limit' || error.status===429){
-      accountState.textContent=t('로그인 메일을 너무 자주 요청했어요. 잠시 후 다시 시도해 주세요.','Too many login emails requested. Please try again later.');
+      accountState.textContent=t('로그인 메일을 너무 자주 요청했어요. 잠시 후 다시 시도해 주세요.','You’ve requested too many sign-in emails. Please try again in a little while.');
     }else{
-      accountState.textContent=t('로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.','Could not send the login link. Please try again later.');
+      accountState.textContent=t('로그인 링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.','We couldn’t send the sign-in link. Please try again in a moment.');
     }
     return;
   }
 
-  accountState.textContent=t('메일을 확인해 주세요. 처음이면 계정도 자동으로 만들어져요.','Check your email. A new account will be created automatically if needed.');
+  accountState.textContent=t('메일을 확인해 주세요. 처음이면 계정도 자동으로 만들어져요.','Check your email for the sign-in link. If you’re new, your account will be created automatically.');
   accountAction.disabled=true;
   let cooldown=60;
-  const originalText=t('로그인 링크 받기','Send login link');
+  const originalText=t('로그인 링크 받기','Email me a sign-in link');
   const timer=setInterval(()=>{
     cooldown--;
     accountAction.textContent=t(`다시 보내기 ${cooldown}초`,`Resend in ${cooldown}s`);
@@ -2035,7 +2036,7 @@ logoutBtn.addEventListener('click',async ()=>{
   await signOut(supabase);
   resetToGuestIdentity();
   accountModal.classList.remove('show');
-  showStatus('로그아웃했어요');
+  showStatus(t('로그아웃했어요','Signed out'));
 });
 
 supabase.auth.onAuthStateChange((_event,session)=>{
@@ -2089,17 +2090,17 @@ async function uploadArtworkToStorage(dataUrl,workId){
 }
 async function completeCurrentWork(){
   if(!currentUser){
-    showStatus('작품을 보관하려면 계정을 먼저 만들어 주세요',2800);
+    showStatus(t('작품을 보관하려면 계정을 먼저 만들어 주세요','Sign in before archiving finished work'),2800);
     historyModal.classList.remove('show');
     accountModal.classList.add('show');
-    accountState.textContent='완성 작품을 보관하려면 이메일로 계정을 만들어 주세요.';
+    accountState.textContent=t('완성 작품을 보관하려면 이메일로 계정을 만들어 주세요.','Sign in with your email to archive finished work.');
     return;
   }
 
   await artworkSaveQueue;
   const workId=await findActiveWork();
   if(!workId){
-    showStatus('진행 중인 작품이 없어요');
+    showStatus(t('진행 중인 작품이 없어요','There is no work in progress'));
     return;
   }
 
@@ -2111,7 +2112,7 @@ async function completeCurrentWork(){
 
   if(error){
     console.warn('complete work',error);
-    showStatus('작품 완료 저장에 실패했어요');
+    showStatus(t('작품 완료 저장에 실패했어요','Could not save the finished work'));
     completeWorkBtn.disabled=false;
     return;
   }
@@ -2120,7 +2121,7 @@ async function completeCurrentWork(){
   activeWorkCoverUrl=null;
   currentWorkElapsedSeconds=0;
   saveProgress();
-  showStatus('작품을 완성했어요 · 다음 작품은 0분부터 시작해요',3200);
+  showStatus(t('작품을 완성했어요 · 다음 작품은 0분부터 시작해요','Finished and archived. Your next work starts at 0 min.'),3200);
   await loadMyHistory();
 }
 
@@ -2147,7 +2148,7 @@ async function deleteWorkCompletely(workId,{active=false}={}){
 
   if(error){
     console.warn('delete work',error);
-    showStatus('작품을 삭제하지 못했어요');
+    showStatus(t('작품을 삭제하지 못했어요','Could not delete the artwork'));
     return false;
   }
 
@@ -2173,22 +2174,22 @@ async function deleteWorkCompletely(workId,{active=false}={}){
 async function deleteCurrentWork(){
   const workId=await findActiveWork();
   if(!workId)return;
-  if(!confirm('현재 작업 중인 작품과 진행 기록을 모두 삭제할까요?'))return;
+  if(!confirm(t('현재 작업 중인 작품과 진행 기록을 모두 삭제할까요?','Delete this work in progress and all of its history?')))return;
 
   deleteCurrentWorkBtn.disabled=true;
   const ok=await deleteWorkCompletely(workId,{active:true});
   deleteCurrentWorkBtn.disabled=false;
   if(ok){
-    showStatus('현재 작품을 폐기했어요');
+    showStatus(t('현재 작품을 폐기했어요','Work discarded'));
     await loadMyHistory();
   }
 }
 
 async function deleteCompletedWork(workId){
-  if(!confirm('이 완성 작품과 진행 기록을 모두 삭제할까요?'))return;
+  if(!confirm(t('이 완성 작품과 진행 기록을 모두 삭제할까요?','Delete this finished work and all of its history?')))return;
   const ok=await deleteWorkCompletely(workId);
   if(ok){
-    showStatus('완성 작품을 삭제했어요');
+    showStatus(t('완성 작품을 삭제했어요','Finished work deleted'));
     await loadMyHistory();
   }
 }
@@ -2223,7 +2224,7 @@ async function loadMyHistory(){
 
   if(hErr || dErr || cErr){
     console.warn(hErr||dErr||cErr);
-    showStatus('기록을 불러오지 못했어요');
+    showStatus(t('기록을 불러오지 못했어요','Could not load your artwork history'));
     return;
   }
 
@@ -2236,7 +2237,7 @@ async function loadMyHistory(){
     buildProgressSlides();
     completeWorkBtn.disabled=false;
     deleteCurrentWorkBtn.disabled=false;
-    historySummary.textContent=`현재 작품 진행 과정 · ${history.length}단계 · 이 작품 ${formatTodayWork(currentWorkElapsedSeconds)}`;
+    historySummary.textContent=t(`현재 작품 진행 과정 · ${history.length}단계 · 이 작품 ${formatTodayWork(currentWorkElapsedSeconds)}`,`Current work · ${history.length} stages · ${formatTodayWork(currentWorkElapsedSeconds)} total`);
     renderProgressSlide();
   }else{
     currentProgressSection.style.display='none';
@@ -2244,7 +2245,7 @@ async function loadMyHistory(){
   }
 
   if(!completed?.length){
-    completedGrid.innerHTML='<div style="color:#8a7b72;font-size:12px">아직 완성한 작품이 없어요.</div>';
+    completedGrid.innerHTML=`<div style="color:#8a7b72;font-size:12px">${t('아직 완성한 작품이 없어요.','No finished works yet.')}</div>`;
   }else{
     for(const work of completed){
       const card=document.createElement('div');
@@ -2252,12 +2253,12 @@ async function loadMyHistory(){
 
       const img=document.createElement('img');
       img.src=work.cover_image_url||'';
-      img.alt='완성 작품';
+      img.alt=t('완성 작품','Finished artwork');
       img.addEventListener('click',()=>{
         if(!work.cover_image_url)return;
         const when=work.completed_at?new Date(work.completed_at):null;
         const meta=when
-          ? t(`완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`,`Completed · ${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`)
+          ? t(`완성 작품 · ${formatLocalDate(when)} · ${formatTodayWork(work.total_work_seconds||0)}`,`Completed · ${formatLocalDate(when)} · ${formatTodayWork(work.total_work_seconds||0)}`)
           : t('완성 작품','Completed artwork');
         openArtworkModal(work.cover_image_url,meta,work.id);
       });
@@ -2266,12 +2267,12 @@ async function loadMyHistory(){
       meta.className='completedMeta';
       const when=work.completed_at?new Date(work.completed_at):null;
       meta.textContent=when
-        ? `${when.toLocaleDateString()} · ${formatTodayWork(work.total_work_seconds||0)}`
+        ? `${formatLocalDate(when)} · ${formatTodayWork(work.total_work_seconds||0)}`
         : formatTodayWork(work.total_work_seconds||0);
 
       const del=document.createElement('button');
       del.className='completedDelete';
-      del.title='삭제';
+      del.title=t('삭제','Delete');
       del.setAttribute('aria-label',t('삭제','Delete'));
       del.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M7 7l1 13h8l1-13"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>';
       del.addEventListener('click',e=>{
@@ -2289,7 +2290,7 @@ function buildProgressSlides(){
   for(const [index,item] of progressSlides.entries()){
     const img=document.createElement('img');
     img.src=item.image_url;
-    img.alt=`진행 ${index+1}단계`;
+    img.alt=t(`진행 ${index+1}단계`,`Progress stage ${index+1}`);
     img.className='progressSlide';
     img.dataset.index=String(index);
 
@@ -2332,7 +2333,7 @@ function renderProgressSlide(){
   }
 
   const when=new Date(active.created_at);
-  progressMeta.textContent=`${progressSlideIndex+1} / ${progressSlides.length} · ${when.toLocaleDateString()} · 이 작품 ${formatTodayWork(active.work_seconds||0)}`;
+  progressMeta.textContent=t(`${progressSlideIndex+1} / ${progressSlides.length} · ${formatLocalDate(when)} · 이 작품 ${formatTodayWork(active.work_seconds||0)}`,`${progressSlideIndex+1} / ${progressSlides.length} · ${formatLocalDate(when)} · ${formatTodayWork(active.work_seconds||0)} on this work`);
 }
 
 let progressTouchStartX=null;
@@ -2396,7 +2397,7 @@ async function syncArtworkSnapshot(snapshot){
 
   const workId=await ensureActiveWork();
   if(!workId){
-    showStatus('작품 기록을 만들지 못했어요');
+    showStatus(t('작품 기록을 만들지 못했어요','Could not create an artwork record'));
     return;
   }
 
@@ -2413,7 +2414,7 @@ async function syncArtworkSnapshot(snapshot){
     stored=await uploadArtworkToStorage(dataUrl,workId);
   }catch(err){
     console.warn('storage upload',err);
-    showStatus('이미지 저장에 실패했어요');
+    showStatus(t('이미지 저장에 실패했어요','Could not save the image'));
     return;
   }
 
@@ -2486,7 +2487,7 @@ function enqueueArtworkSave(dataUrl,seatIndex,workSeconds,lockedUntil){
     .then(()=>syncArtworkSnapshot(snapshot))
     .catch(err=>{
       console.warn('artwork save queue',err);
-      showStatus('작품 저장 중 오류가 있었어요');
+      showStatus(t('작품 저장 중 오류가 있었어요','Something went wrong while saving your artwork'));
     });
   return artworkSaveQueue;
 }
@@ -2737,14 +2738,14 @@ async function renderCompletedArchiveForPreview(workId){
     metaEl.className='artArchiveMeta';
     const when=item.completed_at?new Date(item.completed_at):null;
     metaEl.textContent=when
-      ? `${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`
+      ? `${formatLocalDate(when)} · ${formatTodayWork(item.total_work_seconds||0)}`
       : formatTodayWork(item.total_work_seconds||0);
     card.append(img,metaEl);
     card.addEventListener('click',async ()=>{
       previewWorkId=item.id;
       artPreview.src=item.cover_image_url;
       artMeta.textContent=when
-        ? t(`완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`,`Completed · ${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`)
+        ? t(`완성 작품 · ${formatLocalDate(when)} · ${formatTodayWork(item.total_work_seconds||0)}`,`Completed · ${formatLocalDate(when)} · ${formatTodayWork(item.total_work_seconds||0)}`)
         : t('완성 작품','Completed artwork');
       artArchiveGrid.querySelectorAll('.artArchiveItem').forEach(el=>el.classList.remove('active'));
       card.classList.add('active');
@@ -2775,7 +2776,7 @@ artLikeBtn.addEventListener('click',async ()=>{
     artModal.classList.remove('show');
     accountModal.classList.add('show');
     accountState.textContent=t(
-      '좋아요를 누르려면 먼저 로그인해 주세요.',
+      t('좋아요를 누르려면 먼저 로그인해 주세요.','Sign in to like this artwork'),
       'Log in to like artworks.'
     );
     return;
@@ -2825,7 +2826,7 @@ function openArtworkPreview(seat){
     return true;
   }
 
-  const meta=seat.userData?.artworkMeta || t('아틀리에 작품','Atelier artwork');
+  const meta=seat.userData?.artworkMeta || t('좀비 화실 작품','Zombie Atelier artwork');
   openArtworkModal(src,meta,seatWorkId);
   return true;
 }
@@ -2860,7 +2861,7 @@ function seatHasVisibleArtwork(seat){
 
 function openArtworkPickerForSeat(seat){
   if(!playerSeat || seat!==playerSeat){
-    showStatus('이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요');
+    showStatus(t('이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요','While seated, click your canvas to upload artwork'));
     return true;
   }
 
@@ -2884,7 +2885,7 @@ function openArtworkPickerForSeat(seat){
 
   const canvases=getCanvasMeshesForSeat(seat);
   if(!canvases.length){
-    showStatus('이 이젤의 캔버스 메시를 찾지 못했어요');
+    showStatus(t('이 이젤의 캔버스 메시를 찾지 못했어요','Could not find the canvas on this easel'));
     return true;
   }
 
@@ -2943,7 +2944,7 @@ function applyArtworkImage(img){
 
   const canvases=getCanvasMeshesForSeat(playerSeat);
   if(!canvases.length){
-    showStatus('캔버스 메시를 찾지 못했어요');
+    showStatus(t('캔버스 메시를 찾지 못했어요','Could not find the canvas'));
     return;
   }
 
@@ -2958,8 +2959,8 @@ function applyArtworkImage(img){
   playerSeat.artworkLockedUntil=savedArtworkLockedUntil;
   saveProgress();
   enqueueArtworkSave(savedArtworkDataUrl,playerSeat.index,currentWorkElapsedSeconds,savedArtworkLockedUntil)
-    .then(()=>showStatus('작품 진행 단계가 저장됐어요'));
-  showStatus('작품 저장 중...');
+    .then(()=>showStatus(t('작품 진행 단계가 저장됐어요','Progress snapshot saved')));
+  showStatus(t('작품 저장 중...','Saving artwork...'));
 }
 
 artUpload.addEventListener('change',()=>{
@@ -2974,7 +2975,7 @@ artUpload.addEventListener('change',()=>{
   };
   img.onerror=()=>{
     URL.revokeObjectURL(url);
-    showStatus('이미지를 불러오지 못했어요');
+    showStatus(t('이미지를 불러오지 못했어요','Could not load the image'));
   };
   img.src=url;
 });
@@ -2990,7 +2991,7 @@ async function requestPlayerSeat(seat){
   if(!seat)return false;
 
   if(seat.serverOccupant && seat.serverOccupant!==clientId){
-    showStatus('지금 다른 사람이 앉아 있어요');
+    showStatus(t('지금 다른 사람이 앉아 있어요','Someone is sitting here right now'));
     return true;
   }
 
@@ -3010,7 +3011,7 @@ async function requestPlayerSeat(seat){
       playNPC(npc,'Avatar_Walk');
       seat.occupiedBy=null;
     }else{
-      showStatus('지금 다른 사람이 앉아 있어요');
+      showStatus(t('지금 다른 사람이 앉아 있어요','Someone is sitting here right now'));
       return true;
     }
   }
@@ -3022,9 +3023,9 @@ async function requestPlayerSeat(seat){
   if(!claimed){
     await fetchServerState();
     if(seat.serverOccupant && seat.serverOccupant!==clientId){
-      showStatus('지금 다른 사람이 앉아 있어요');
+      showStatus(t('지금 다른 사람이 앉아 있어요','Someone is sitting here right now'));
     }else{
-      showStatus('이젤 연결을 다시 확인했어요. 한 번 더 눌러주세요');
+      showStatus(t('이젤 연결을 다시 확인했어요. 한 번 더 눌러주세요','Easel connection refreshed. Click it once more.'));
     }
     return true;
   }
@@ -3033,7 +3034,7 @@ async function requestPlayerSeat(seat){
   pendingPlayerSeat=seat;
   moveTarget=seat.position.clone();
   playAvatar('Avatar_Walk');
-  showStatus('스툴로 이동 중');
+  showStatus(t('스툴로 이동 중','Walking to the stool'));
   return true;
 }
 
@@ -3251,19 +3252,19 @@ function setClickTarget(clientX,clientY){
   if(!raycaster.ray.intersectPlane(groundPlane,hit))return;
 
   if(!isWalkableWorldPosition(hit)){
-    showStatus('파빌리온, 다리 또는 건너편 부지를 클릭해 주세요');
+    showStatus(t('파빌리온, 다리 또는 건너편 부지를 클릭해 주세요','Click somewhere on the pavilion, bridge, or gallery lot'));
     return;
   }
 
   if(isInsideCenterBlock(hit,.14)){
-    showStatus('중앙 작업대는 지나갈 수 없어요');
+    showStatus(t('중앙 작업대는 지나갈 수 없어요','You can’t walk through the center table'));
     return;
   }
 
   releasePlayerSeat();
   moveTarget=new THREE.Vector3(hit.x,avatarRoot.position.y,hit.z);
   playAvatar('Avatar_Walk');
-  showStatus('이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
+  showStatus(t('이동 중 → ','Walking → ')+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
 }
 
 const CAMERA_DRAG_THRESHOLD=12;
@@ -3429,7 +3430,7 @@ function updateMovement(dt){
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-        showStatus('내 이젤에서 작업 중 · 일어나면 타이머 일시정지');
+        showStatus(t('내 이젤에서 작업 중 · 일어나면 타이머 일시정지','Working at your easel · the timer pauses when you stand up'));
         broadcastMotion(true);
       }else{
         playAvatar('Avatar_Idle');
@@ -3829,7 +3830,7 @@ function createBridgeAndGalleryLot(){
   ctx.font='700 46px sans-serif';
   ctx.textAlign='center';
   ctx.textBaseline='middle';
-  ctx.fillText('전시관 예정지',256,90);
+  ctx.fillText(t('전시관 예정지','Future gallery'),256,90);
   const signTex=new THREE.CanvasTexture(signCanvas);
   signTex.colorSpace=THREE.SRGBColorSpace;
   const sign=new THREE.Mesh(
@@ -4149,7 +4150,8 @@ function tick(){
     blockedPromptUntil:seatedBlockedSeat?Number.POSITIVE_INFINITY:blockedPromptUntil,
     isArtworkLocked,
     blockedEaselPrompts,
-    workPrompts:WORK_PROMPTS
+    workPrompts:WORK_PROMPTS,
+    activeWorkPrompts:ACTIVE_WORK_PROMPTS
   });
   updateMovement(dt);
   updateCamera();
