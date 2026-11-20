@@ -6,7 +6,7 @@ const ARTIST_QUIRKS_KO=['발가락 만지는','귀가 가려운','졸린 눈 비
 const ARTIST_NAMES_EN=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
 const ARTIST_QUIRKS_EN=['Toe-Tapping','Itchy-Eared','Sleepy-Eyed','Coffee-Cold','Brush-Lost','Window-Gazing','Holding-a-Yawn','Humming','One-Sock-Missing','Hungry','Daydreaming','Paint-Smudged','Stretching','Pencil-Chewing','Cloud-Counting'];
 
-function hashString(str){
+export function hashString(str){
   let h=2166136261;
   for(let i=0;i<str.length;i++){
     h^=str.charCodeAt(i);
