@@ -1471,7 +1471,7 @@ function forceEaselWoodMaterials(root){
 function forceEaselTopClampsByGeometry(root){
   if(!root)return;
 
-  const easels=collectNamedRoots(root,o=>normalizedAssetName(o.name).startsWith('easel'));
+  const easels=collectNamedRoots(root,o=>/^easel\s+\d+$/.test(normalizedAssetName(o.name)));
   for(const easel of easels){
     easel.updateMatrixWorld(true);
 
@@ -1583,13 +1583,15 @@ function keepFurnitureInsidePavilion(furnitureRoot){
 
   furnitureRoot.traverse(o=>{
     const n=(o.name||'').toLowerCase();
-    const isCandidate=n.startsWith('easel') || n.includes('stool_group') || n.startsWith('stool');
+    const normalized=normalizedAssetName(o.name);
+    const isCandidate=/^easel\s+\d+$/.test(normalized) || n.includes('stool_group') || n.startsWith('stool');
     if(!isCandidate)return;
 
     let p=o.parent;
     while(p && p!==furnitureRoot){
       const pn=(p.name||'').toLowerCase();
-      if(pn.startsWith('easel') || pn.includes('stool_group') || pn.startsWith('stool'))return;
+      const pNormalized=normalizedAssetName(p.name);
+      if(/^easel\s+\d+$/.test(pNormalized) || pn.includes('stool_group') || pn.startsWith('stool'))return;
       p=p.parent;
     }
     roots.push(o);
