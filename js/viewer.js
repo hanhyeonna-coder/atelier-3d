@@ -102,11 +102,12 @@ fill.position.set(6,5,5);
 scene.add(fill);
 
 const DAY_SKY=new THREE.Color(0xd8e6ee);
-const SUNSET_SKY=new THREE.Color(0xf3a37f);
-const SUNSET_LATE_SKY=new THREE.Color(0xc66f7f);
+const SUNSET_SKY=new THREE.Color(0xff7a2f);
+const SUNSET_LATE_SKY=new THREE.Color(0xc92f4f);
+const SUNSET_PURPLE=new THREE.Color(0x5b2a78);
 const NIGHT_SKY=new THREE.Color(0x08111f);
 const DAY_SUN_COLOR=new THREE.Color(0xffddb5);
-const SUNSET_SUN_COLOR=new THREE.Color(0xff9a59);
+const SUNSET_SUN_COLOR=new THREE.Color(0xff5b21);
 let nightFactor=0;
 let lastNightLightingUpdate=0;
 const skyClouds=[];
@@ -408,8 +409,11 @@ function updateDayNightLighting(force=false){
   const duskPhase=THREE.MathUtils.clamp(nightFactor/.72,0,1);
   const sky=DAY_SKY.clone();
   if(sunsetPhase>0){
-    const warmSky=SUNSET_SKY.clone().lerp(SUNSET_LATE_SKY,THREE.MathUtils.clamp(nightFactor/.55,0,1));
-    sky.lerp(warmSky,sunsetPhase);
+    const duskMix=THREE.MathUtils.clamp(nightFactor/.62,0,1);
+    const warmSky=SUNSET_SKY.clone()
+      .lerp(SUNSET_LATE_SKY,Math.min(1,duskMix*1.15))
+      .lerp(SUNSET_PURPLE,Math.max(0,(duskMix-.45)/.55));
+    sky.lerp(warmSky,Math.min(1,sunsetPhase*1.18));
   }
   sky.lerp(NIGHT_SKY,nightFactor);
   scene.background=sky;
@@ -418,12 +422,12 @@ function updateDayNightLighting(force=false){
   sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
   sun.color.copy(DAY_SUN_COLOR).lerp(SUNSET_SUN_COLOR,sunsetFactor).lerp(new THREE.Color(0xb9c9e8),nightFactor*.72);
   fill.intensity=THREE.MathUtils.lerp(.35,.15,nightFactor);
-  fill.color.set(0xc6ddff).lerp(new THREE.Color(0xf0a6b5),sunsetFactor*.55);
+  fill.color.set(0xc6ddff).lerp(new THREE.Color(0xff6b55),sunsetFactor*.78);
   scene.environmentIntensity=THREE.MathUtils.lerp(.38,.12,nightFactor);
   starField.visible=nightFactor>.16;
 
   const dayCloud=new THREE.Color(0xffffff);
-  const sunsetCloud=new THREE.Color(0xffc3ad);
+  const sunsetCloud=new THREE.Color(0xff8c72);
   const nightCloud=new THREE.Color(0xaab6c8);
   for(const cloud of skyClouds){
     cloud.traverse(o=>{
@@ -436,7 +440,7 @@ function updateDayNightLighting(force=false){
     reflection.material.opacity=THREE.MathUtils.lerp(.58,.22,nightFactor);
     reflection.material.color
       .set(0xd5edf4)
-      .lerp(new THREE.Color(0xf0aa96),sunsetFactor*.72)
+      .lerp(new THREE.Color(0xff744d),sunsetFactor*.88)
       .lerp(new THREE.Color(0x718092),nightFactor);
   }
 
@@ -1615,6 +1619,63 @@ function setAvatarNameLabel(root,text){
   root.add(makeNameLabel(text));
 }
 
+function showGreetingBubble(root,text){
+  if(!root || !text)return;
+  const old=root.getObjectByName('Greeting Bubble');
+  if(old){
+    old.material?.map?.dispose?.();
+    old.material?.dispose?.();
+    old.parent?.remove(old);
+  }
+
+  const font='700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
+  const measure=document.createElement('canvas').getContext('2d');
+  measure.font=font;
+  const textWidth=Math.ceil(measure.measureText(text).width);
+  const w=Math.max(180,textWidth+64);
+  const h=72;
+  const canvas=document.createElement('canvas');
+  canvas.width=w;
+  canvas.height=h;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,255,255,.94)';
+  ctx.strokeStyle='rgba(78,58,46,.22)';
+  ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.roundRect(6,6,w-12,h-12,26);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle='#4a3930';
+  ctx.font=font;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(text,w/2,h/2+1);
+
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  const mat=new THREE.SpriteMaterial({
+    map:tex,transparent:true,depthTest:false,depthWrite:false,opacity:.98
+  });
+  const sprite=new THREE.Sprite(mat);
+  sprite.name='Greeting Bubble';
+  const worldH=.28;
+  sprite.scale.set(worldH*(w/h),worldH,1);
+  sprite.position.set(0,2.38,0);
+  sprite.renderOrder=110;
+  root.add(sprite);
+
+  setTimeout(()=>{
+    const current=root.getObjectByName('Greeting Bubble');
+    if(current!==sprite)return;
+    sprite.material?.map?.dispose?.();
+    sprite.material?.dispose?.();
+    sprite.parent?.remove(sprite);
+  },GREET_DURATION_MS);
+}
+
 function ensureRemoteAvatar(id,state={}){
   if(id===clientId || !avatarModel)return null;
   let entry=remoteAvatars.get(id);
@@ -1815,6 +1876,10 @@ function playSynchronizedGreeting(entry,startAtMs){
 
     localGreetingUntil=performance.now()+GREET_DURATION_MS;
     entry.greetingUntil=performance.now()+GREET_DURATION_MS;
+
+    const greetText=t('반가워요!','Hi!');
+    showGreetingBubble(avatarRoot,greetText);
+    showGreetingBubble(entry.root,greetText);
 
     if(avatarActions?.['Avatar_Greet'])playAvatar('Avatar_Greet',.08);
     if(entry.actions?.['Avatar_Greet'])playRemote(entry,'Avatar_Greet');
