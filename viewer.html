@@ -1631,10 +1631,14 @@ function collectSeatSlots(furnitureRoot){
       return;
     }
 
-    if(n.startsWith('easel')){
+    const normalized=normalizedAssetName(o.name);
+    const isEaselRoot=/^easel\s+\d+$/.test(normalized);
+
+    if(isEaselRoot){
       let p=o.parent;
       while(p && p!==furnitureRoot){
-        if((p.name||'').toLowerCase().startsWith('easel'))return;
+        const pn=normalizedAssetName(p.name);
+        if(/^easel\s+\d+$/.test(pn))return;
         p=p.parent;
       }
 
@@ -1650,6 +1654,7 @@ function collectSeatSlots(furnitureRoot){
 
   // Match each stool to the closest easel, then place the stool consistently
   // on the pavilion-center side of that easel.
+  console.log('Seat easel roots:',easels.map(e=>e.o.name));
   const unused=[...easels];
 
   stoolRoots.forEach((stool,index)=>{
