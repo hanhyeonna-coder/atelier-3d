@@ -1420,6 +1420,71 @@ function logEaselClampDiagnostics(root){
   window.__easelClampDiagnostics=rows;
 }
 
+function repairFurnitureExport(root){
+  if(!root)return;
+
+  // Blender export currently contains 10 stool transform groups,
+  // but mesh children only under one source group. Clone that stool
+  // geometry into the remaining empty transform groups.
+  const stoolGroups=[];
+  root.children.forEach(o=>{
+    if(normalizedAssetName(o.name).startsWith('stool group 01'))stoolGroups.push(o);
+  });
+
+  const source=stoolGroups.find(g=>{
+    let hasMesh=false;
+    g.traverse(o=>{if(o.isMesh)hasMesh=true;});
+    return hasMesh;
+  });
+
+  if(source){
+    for(const target of stoolGroups){
+      if(target===source)continue;
+      let hasMesh=false;
+      target.traverse(o=>{if(o.isMesh)hasMesh=true;});
+      if(hasMesh)continue;
+
+      for(const child of source.children){
+        const clone=child.clone(true);
+        clone.name=(child.name||'Stool Part')+'__clone_'+target.name;
+        clone.traverse(o=>{
+          if(o.isMesh && o.material){
+            if(Array.isArray(o.material))o.material=o.material.map(m=>m?.clone?.()||m);
+            else o.material=o.material.clone?.()||o.material;
+          }
+        });
+        target.add(clone);
+      }
+    }
+  }
+
+  root.updateMatrixWorld(true);
+}
+
+function forceNamedClampMaterials(root){
+  if(!root)return;
+  root.traverse(o=>{
+    if(!o.isMesh)return;
+    const n=normalizedAssetName(o.name);
+    if(!/^easel\s+\d+\s+clamp(?:\s+\d+)?$/.test(n))return;
+
+    const mat=new THREE.MeshStandardMaterial({
+      name:'Atelier Dark Oak Clamp',
+      color:new THREE.Color('#4f2b1b'),
+      roughness:.62,
+      metalness:0,
+      transparent:false,
+      opacity:1,
+      depthWrite:true,
+      side:THREE.FrontSide
+    });
+    o.material=mat;
+    o.castShadow=true;
+    o.receiveShadow=true;
+    o.userData.atelierClampFixed=true;
+  });
+}
+
 function forceEaselWoodMaterials(root){
   if(!root)return;
 
@@ -4275,10 +4340,12 @@ Promise.all([
 
   if(furnitureGLB){
     furnitureScene=furnitureGLB.scene;
+    repairFurnitureExport(furnitureGLB.scene);
     keepOnlyFurniture(furnitureGLB.scene);
     enhanceMaterials(furnitureGLB.scene);
     forceEaselWoodMaterials(furnitureGLB.scene);
     forceEaselTopClampsByGeometry(furnitureGLB.scene);
+    forceNamedClampMaterials(furnitureGLB.scene);
     logEaselClampDiagnostics(furnitureGLB.scene);
 
     scene.add(furnitureGLB.scene);
