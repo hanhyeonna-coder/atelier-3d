@@ -25,6 +25,7 @@ import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
 import {createWorkPromptController} from './work-prompt.js';
 import {loadGLB,loadOptionalGLB} from './asset-loader.js';
+import {resolveArtworkExhibitionUntil} from './exhibition-state.js';
 
 applyLocaleUI();
 
@@ -1477,9 +1478,8 @@ function applyServerArtworks(rows){
       return false;
     }
 
-    const lockUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
-    const isExpiredExhibition=lockUntil && lockUntil<=now;
-    if(isExpiredExhibition){
+    const lockUntil=resolveArtworkExhibitionUntil(row,ARTWORK_HOLD_MS,now);
+    if(!lockUntil){
       console.warn('Ignoring expired easel artwork row',row.seat_index,row.display_name||'');
       return false;
     }
@@ -1493,7 +1493,7 @@ function applyServerArtworks(rows){
       seat===playerArtworkSeat ||
       (savedArtworkSeatIndex===seat.index && !!savedArtworkDataUrl);
 
-    seat.artworkLockedUntil=row?.locked_until?new Date(row.locked_until).getTime():0;
+    seat.artworkLockedUntil=resolveArtworkExhibitionUntil(row,ARTWORK_HOLD_MS,now);
     seat.userData=seat.userData||{};
 
     if(!row){
@@ -2490,13 +2490,6 @@ function enqueueArtworkSave(dataUrl,seatIndex,workSeconds,lockedUntil){
       showStatus('작품 저장 중 오류가 있었어요');
     });
   return artworkSaveQueue;
-}
-
-async function lockServerArtwork(seat,untilMs){
-  if(!seat || savedArtworkSeatIndex!==seat.index)return;
-  await supabase.from('atelier_artworks')
-    .update({locked_until:new Date(untilMs).toISOString(),updated_at:new Date().toISOString()})
-    .eq('owner_id',ownerId);
 }
 
 function localDateKey(){
