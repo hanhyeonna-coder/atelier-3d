@@ -906,6 +906,35 @@ function constrainWalkable(next,previous){
   return constrainWalkableByConfig(next,previous,WALKABLE_GEOMETRY);
 }
 
+function pavilionArcWaypoints(from,to,y){
+  const points=[];
+  const safeRadius=6.6;
+  const fromAngle=Math.atan2(from.x,from.z);
+  const toAngle=Math.atan2(to.x,to.z);
+
+  const fromOuter=new THREE.Vector3(
+    Math.sin(fromAngle)*Math.max(safeRadius,Math.hypot(from.x,from.z)),
+    y,
+    Math.cos(fromAngle)*Math.max(safeRadius,Math.hypot(from.x,from.z))
+  );
+  if(from.distanceTo(fromOuter)>.18)points.push(fromOuter);
+
+  let delta=toAngle-fromAngle;
+  delta=Math.atan2(Math.sin(delta),Math.cos(delta));
+  const steps=Math.max(2,Math.ceil(Math.abs(delta)/(Math.PI/8)));
+  for(let i=1;i<steps;i++){
+    const a=fromAngle+delta*(i/steps);
+    points.push(new THREE.Vector3(
+      Math.sin(a)*safeRadius,
+      y,
+      Math.cos(a)*safeRadius
+    ));
+  }
+
+  points.push(to.clone());
+  return points;
+}
+
 function setMoveRoute(destination){
   moveWaypoints=[];
   if(!avatarRoot){
@@ -920,9 +949,19 @@ function setMoveRoute(destination){
   const bridgeExit=bridgeLocalToWorld(0,BRIDGE_END_Z-.45,WALKABLE_GEOMETRY,y);
 
   if(fromZone==='pavilion' && toZone==='gallery'){
-    moveWaypoints=[bridgeEntry,bridgeExit,destination.clone()];
+    moveWaypoints=[
+      ...pavilionArcWaypoints(avatarRoot.position,bridgeEntry,y),
+      bridgeExit,
+      destination.clone()
+    ];
   }else if(fromZone==='gallery' && toZone==='pavilion'){
-    moveWaypoints=[bridgeExit,bridgeEntry,destination.clone()];
+    const pavilionTarget=destination.clone();
+    const insideBridge=bridgeEntry.clone();
+    moveWaypoints=[
+      bridgeExit,
+      insideBridge,
+      ...pavilionArcWaypoints(insideBridge,pavilionTarget,y)
+    ];
   }else{
     moveWaypoints=[destination.clone()];
   }
