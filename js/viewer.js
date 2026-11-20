@@ -487,15 +487,6 @@ function standingPlayerHatColor(){
   return stableHatColorForClient(clientId);
 }
 
-function refreshStandingAvatarColors(){
-  if(avatarModel){
-    recolorBeret(avatarModel,stableHatColorForClient(clientId));
-  }
-  for(const [id,entry] of remoteAvatars){
-    recolorBeret(entry.model,stableHatColorForClient(id));
-  }
-}
-
 let envMixer=null;
 let boatMixer=null;
 let extEnvMixer=null;
@@ -3434,7 +3425,7 @@ function updateMovement(dt){
         playerSeat=pendingPlayerSeat;
         pendingPlayerSeat=null;
         mySeat=playerSeat;
-        recolorBeret(avatarModel,hatColorForSeatIndex(playerSeat.index));
+        recolorBeret(avatarModel,stableHatColorForClient(clientId));
         avatarRoot.rotation.y=
           Math.atan2(playerSeat.faceDir.x,playerSeat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
         playAvatar(avatarActions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
