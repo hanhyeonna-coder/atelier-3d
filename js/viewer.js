@@ -68,9 +68,9 @@ const workPromptController=createWorkPromptController(scene);
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:!IS_MOBILE_RENDER});
-renderer.setPixelRatio(Math.min(devicePixelRatio,IS_MOBILE_RENDER?1.2:2));
+renderer.setPixelRatio(Math.min(devicePixelRatio,IS_MOBILE_RENDER?1:2));
 renderer.setSize(innerWidth,innerHeight);
-renderer.shadowMap.enabled=true;
+renderer.shadowMap.enabled=!IS_MOBILE_RENDER;
 renderer.shadowMap.type=IS_MOBILE_RENDER?THREE.PCFShadowMap:THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
@@ -86,7 +86,7 @@ scene.add(hemi);
 
 const sun=new THREE.DirectionalLight(0xffddb5,1.72);
 sun.position.set(-8,10,-4);
-sun.castShadow=true;
+sun.castShadow=!IS_MOBILE_RENDER;
 sun.shadow.mapSize.set(IS_MOBILE_RENDER?512:2048,IS_MOBILE_RENDER?512:2048);
 sun.shadow.camera.near=.5;
 sun.shadow.camera.far=35;
@@ -573,8 +573,8 @@ const BRIDGE_END_Z=15.8;
 const GALLERY_CENTER_Z=18.4;
 const GALLERY_HALF_WIDTH=5.2;
 const GALLERY_HALF_DEPTH=3.7;
-const MOVE_SPEED=IS_MOBILE_RENDER?2.02:1.85;
-const WALK_ANIM_SPEED=IS_MOBILE_RENDER?1.2:1;
+const MOVE_SPEED=IS_MOBILE_RENDER?2.35:1.85;
+const WALK_ANIM_SPEED=IS_MOBILE_RENDER?1.45:1;
 const CENTER_BLOCK_RADIUS=1.90;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
 const SIT_YAW_CORRECTION=0; // Seat faceDir already points from stool to easel; no extra quarter-turn.
@@ -647,8 +647,8 @@ function enhanceMaterials(root){
     const objectName=(o.name||'').toLowerCase();
     const mats=Array.isArray(o.material)?o.material:[o.material];
 
-    o.castShadow=true;
-    o.receiveShadow=true;
+    o.castShadow=!IS_MOBILE_RENDER;
+    o.receiveShadow=!IS_MOBILE_RENDER;
 
     mats.filter(Boolean).forEach((mat,index)=>{
       const materialName=(mat.name||'').toLowerCase();
@@ -795,8 +795,8 @@ function enhanceMaterials(root){
           );
         }
 
-        o.castShadow=true;
-        o.receiveShadow=true;
+        o.castShadow=!IS_MOBILE_RENDER;
+        o.receiveShadow=!IS_MOBILE_RENDER;
         mat.needsUpdate=true;
         return;
       }
@@ -848,8 +848,8 @@ function enhanceMaterials(root){
         if('metalness' in mat)mat.metalness=0;
         if('envMapIntensity' in mat)mat.envMapIntensity=0.32;
 
-        o.castShadow=true;
-        o.receiveShadow=true;
+        o.castShadow=!IS_MOBILE_RENDER;
+        o.receiveShadow=!IS_MOBILE_RENDER;
         mat.needsUpdate=true;
         return;
       }
@@ -983,8 +983,8 @@ function forceNamedClampMaterials(root){
       side:THREE.FrontSide
     });
     o.material=mat;
-    o.castShadow=true;
-    o.receiveShadow=true;
+    o.castShadow=!IS_MOBILE_RENDER;
+    o.receiveShadow=!IS_MOBILE_RENDER;
     o.userData.atelierClampFixed=true;
   });
 }
@@ -4265,25 +4265,26 @@ function tick(){
 
   const dt=Math.min(clock.getDelta(),.05);
   mobileFrameIndex++;
-  const secondaryFrame=!IS_MOBILE_RENDER || mobileFrameIndex%2===0;
+  const secondaryFrame=!IS_MOBILE_RENDER || mobileFrameIndex%3===0;
+  const lightFrame=!IS_MOBILE_RENDER || mobileFrameIndex%4===0;
 
   if(avatarMixer)avatarMixer.update(dt);
-  if(secondaryFrame)remoteAvatars.forEach(entry=>entry.mixer?.update(IS_MOBILE_RENDER?dt*2:dt));
+  if(secondaryFrame)remoteAvatars.forEach(entry=>entry.mixer?.update(IS_MOBILE_RENDER?dt*3:dt));
   updateRemoteMotion(dt);
   if(secondaryFrame)updateProximityNameLabels();
 
-  if(npcs.length&&secondaryFrame)updateNPCs(IS_MOBILE_RENDER?dt*2:dt,performance.now()/1000);
+  if(npcs.length&&secondaryFrame)updateNPCs(IS_MOBILE_RENDER?dt*3:dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
-  if(extEnvMixer&&secondaryFrame)extEnvMixer.update(IS_MOBILE_RENDER?dt*2:dt);
-  updateBoatMotion(dt);
-  if(secondaryFrame)updateAtmosphericClouds(IS_MOBILE_RENDER?dt*2:dt);
-  if(secondaryFrame)updateSnow(IS_MOBILE_RENDER?dt*2:dt);
+  if(extEnvMixer&&secondaryFrame)extEnvMixer.update(IS_MOBILE_RENDER?dt*3:dt);
+  if(secondaryFrame)updateBoatMotion(IS_MOBILE_RENDER?dt*3:dt);
+  if(lightFrame)updateAtmosphericClouds(IS_MOBILE_RENDER?dt*4:dt);
+  if(lightFrame)updateSnow(IS_MOBILE_RENDER?dt*4:dt);
   updateDayNightLighting();
-  updateStarTwinkle(performance.now());
+  if(lightFrame)updateStarTwinkle(performance.now());
 
   // Animate only known water materials; avoid traversing the entire scene every frame.
   const rippleNow=performance.now();
-  if(secondaryFrame)for(const waterMaterial of animatedWaterMaterials){
+  if(lightFrame)for(const waterMaterial of animatedWaterMaterials){
     if(!waterMaterial?.normalMap)continue;
     waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.075)%1;
     waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.042)%1;
