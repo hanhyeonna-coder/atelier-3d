@@ -1427,21 +1427,7 @@ function syncRemoteAvatars(){
     const entry=ensureRemoteAvatar(id,{seatIndex:seat.index});
     if(!entry)continue;
     recolorBeret(entry.model,stableHatColorForClient(id));
-
-    const motion=remoteMotion.get(id);
-    const freshMotion=
-      motion &&
-      performance.now()-(motion.receivedAt||0)<1600;
-
-    // Claiming a stool happens before the remote player finishes walking there.
-    // Never snap them to the stool until their own realtime state says "working".
-    if(freshMotion && motion.state==='working'){
-      entry.targetPosition.copy(seat.position);
-      entry.targetYaw=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
-      entry.root.position.copy(seat.position);
-      entry.root.rotation.y=entry.targetYaw;
-      playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-    }
+    // Seat sync tracks ownership only. Position/yaw are realtime-only.
   }
 }
 
@@ -1640,7 +1626,6 @@ function applyPresenceRows(rows){
     if(!row || row.client_id===clientId)continue;
     const lastSeen=row.last_seen?new Date(row.last_seen).getTime():0;
     if(!lastSeen || now-lastSeen>3500)continue;
-    if(!Number.isFinite(row.x) || !Number.isFinite(row.z))continue;
 
     const entry=ensureRemoteAvatar(row.client_id,{
       seatIndex:row.seat_index,
@@ -1648,25 +1633,19 @@ function applyPresenceRows(rows){
     });
     if(!entry)continue;
 
-    const realtime=remoteMotion.get(row.client_id);
-    const hasFreshRealtime=
-      realtime &&
-      performance.now()-(realtime.receivedAt||0)<1600;
-
     entry.remoteState=row.state||entry.remoteState||'idle';
     entry.lastPresenceAt=performance.now();
 
-    // Realtime broadcast is authoritative for motion. Database presence is only
-    // a fallback so older coordinates never yank the avatar backwards.
-    if(!hasFreshRealtime){
+    // DB presence is metadata/liveness only after realtime motion is seen.
+    // Use DB coordinates just once for the initial placement so stale polls
+    // can never pull a remote avatar backward later.
+    if(!entry.hasRealtimeMotion && !entry.hasInitialPresencePosition &&
+       Number.isFinite(row.x) && Number.isFinite(row.z)){
       entry.targetPosition.set(row.x,0,row.z);
       if(Number.isFinite(row.yaw))entry.targetYaw=row.yaw;
-
-      if(!entry.lastMotionAt){
-        entry.root.position.copy(entry.targetPosition);
-        entry.root.rotation.y=entry.targetYaw;
-      }
-      entry.lastMotionAt=performance.now();
+      entry.root.position.copy(entry.targetPosition);
+      entry.root.rotation.y=entry.targetYaw;
+      entry.hasInitialPresencePosition=true;
 
       if(row.state==='working'){
         playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
@@ -1744,6 +1723,7 @@ function handleRemoteMotion(message){
   entry.targetPosition.set(p.x,0,p.z);
   entry.targetYaw=Number.isFinite(p.yaw)?p.yaw:entry.root.rotation.y;
   entry.lastMotionAt=performance.now();
+  entry.hasRealtimeMotion=true;
   entry.remoteState=p.state||'idle';
 
   if(p.state==='working'){
@@ -1800,28 +1780,15 @@ function playSynchronizedGreeting(entry,startAtMs){
     localGreetingUntil=performance.now()+GREET_DURATION_MS;
     entry.greetingUntil=performance.now()+GREET_DURATION_MS;
 
-    const greetText=t('👋 반가워요!','👋 Hi!');
-    setAvatarNameLabel(avatarRoot,greetText);
-    setAvatarNameLabel(entry.root,greetText);
-    const ownGreetLabel=avatarRoot.getObjectByName('Player Name Label');
-    const remoteGreetLabel=entry.root.getObjectByName('Player Name Label');
-    if(ownGreetLabel)ownGreetLabel.visible=true;
-    if(remoteGreetLabel)remoteGreetLabel.visible=true;
-
     if(avatarActions?.['Avatar_Greet'])playAvatar('Avatar_Greet',.08);
     if(entry.actions?.['Avatar_Greet'])playRemote(entry,'Avatar_Greet');
 
     setTimeout(()=>{
       if(!playerSeat)playAvatar('Avatar_Idle',.10);
       if(remoteAvatars.has(entry.clientId))playRemote(entry,'Avatar_Idle');
-      setAvatarNameLabel(avatarRoot,displayName);
-      if(remoteAvatars.has(entry.clientId)){
-        setAvatarNameLabel(entry.root,entry.displayName||t('이름 없는 화가','Unnamed artist'));
-      }
     },GREET_DURATION_MS);
   },delay);
 }
-
 function handleGreetingBroadcast(message){
   const p=message?.payload;
   if(!p || !p.from || !p.to || !Number.isFinite(p.startAt))return;
@@ -1901,7 +1868,8 @@ function updateRemoteMotion(dt){
     delta=Math.atan2(Math.sin(delta),Math.cos(delta));
     entry.root.rotation.y+=delta*Math.min(1,dt*10);
 
-    if(now-entry.lastMotionAt>2500 && !seatSlots.some(seat=>seat.serverOccupant===id)){
+    const lastSignal=Math.max(entry.lastMotionAt||0,entry.lastPresenceAt||0);
+    if(now-lastSignal>6000 && !seatSlots.some(seat=>seat.serverOccupant===id)){
       disposeRemoteAvatar(entry);
       remoteMotion.delete(id);
     }
