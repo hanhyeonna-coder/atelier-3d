@@ -5,64 +5,17 @@ import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {createClient} from '@supabase/supabase-js';
 
-const loading=document.getElementById('loading');
-const loadingMessage=document.getElementById('loadingMessage');
-const controlHint=document.getElementById('controlHint');
-const centerHint=document.getElementById('centerHint');
-const status=document.getElementById('statusToast');
-const workTimer=document.getElementById('workTimer');
-const artUpload=document.getElementById('artUpload');
-const artModal=document.getElementById('artModal');
-const artPreview=document.getElementById('artPreview');
-const artMeta=document.getElementById('artMeta');
-const artLikeBtn=document.getElementById('artLikeBtn');
-const artArchiveSection=document.getElementById('artArchiveSection');
-const artArchiveTitle=document.getElementById('artArchiveTitle');
-const artArchiveGrid=document.getElementById('artArchiveGrid');
-const artClose=document.getElementById('artClose');
-const historyBtn=document.getElementById('historyBtn');
-const historyModal=document.getElementById('historyModal');
-const historyClose=document.getElementById('historyClose');
-const currentProgressSection=document.getElementById('currentProgressSection');
-const IS_KO=(navigator.language||'').toLowerCase().startsWith('ko');
-const t=(ko,en)=>IS_KO?ko:en;
+import {
+  loading,loadingMessage,controlHint,centerHint,workTimer,artUpload,artModal,artPreview,artMeta,
+  artLikeBtn,artArchiveSection,artArchiveTitle,artArchiveGrid,artClose,historyBtn,historyModal,
+  historyClose,currentProgressSection,historySummary,historyGrid,progressCarousel,progressMeta,
+  completeWorkBtn,deleteCurrentWorkBtn,completedGrid,accountBtn,accountModal,accountClose,
+  accountEmail,accountAction,logoutBtn,accountState,IS_KO,t,applyLocaleUI,showStatus
+} from './ui.js';
+import {
+  IS_MOBILE_RENDER,ARTWORK_HOLD_MS,PRESENCE_PULSE_MS,PRESENCE_POLL_MS,HEARTBEAT_MS,SNOW_COUNT
+} from './config.js';
 
-const historySummary=document.getElementById('historySummary');
-const historyGrid=document.getElementById('historyGrid');
-const progressCarousel=document.getElementById('progressCarousel');
-const progressMeta=document.getElementById('progressMeta');
-const completeWorkBtn=document.getElementById('completeWorkBtn');
-const deleteCurrentWorkBtn=document.getElementById('deleteCurrentWorkBtn');
-const completedGrid=document.getElementById('completedGrid');
-const accountBtn=document.getElementById('accountBtn');
-const accountModal=document.getElementById('accountModal');
-const accountClose=document.getElementById('accountClose');
-const accountEmail=document.getElementById('accountEmail');
-const accountAction=document.getElementById('accountAction');
-const logoutBtn=document.getElementById('logoutBtn');
-const accountState=document.getElementById('accountState');
-const accountTitle=document.getElementById('accountTitle');
-const accountDesc=document.getElementById('accountDesc');
-
-function applyLocaleUI(){
-  controlHint.textContent=t(
-    '클릭: 이동/스툴 앉기 · 드래그: 시점 · 휠: 줌 · WASD/방향키: 직접 이동',
-    'Click: move/sit · Drag: look · Wheel: zoom · WASD/arrow keys: move'
-  );
-  historyBtn.textContent=t('내 그림 진행 기록','My Art Progress');
-  accountBtn.textContent='👤';
-  accountTitle.textContent=t('내 아틀리에 계정','My Atelier Account');
-  accountDesc.textContent=t(
-    '이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.',
-    'Log in by email to continue the same artwork progress across devices.'
-  );
-  accountAction.textContent=t('로그인 링크 받기','Send login link');
-  historySummary.textContent=t('현재 작품 진행 과정','Current artwork progress');
-  completeWorkBtn.textContent=t('작품 완성하고 보관하기','Complete & archive');
-  deleteCurrentWorkBtn.textContent=t('이 작품 폐기하기','Discard this artwork');
-  completedTitle.textContent=t('완성 작품 보관함','Completed artworks');
-  artPreview.alt=t('작품 크게 보기','Artwork preview');
-}
 applyLocaleUI();
 
 const loadingCopiesKo=[
@@ -96,14 +49,6 @@ setTimeout(()=>{
   centerHint.classList.add('show');
 },6900);
 setTimeout(()=>centerHint.classList.remove('show'),10200);
-let statusHideTimer=null;
-function showStatus(message,ms=2200){
-  status.textContent=message;
-  status.classList.add('show');
-  clearTimeout(statusHideTimer);
-  statusHideTimer=setTimeout(()=>status.classList.remove('show'),ms);
-}
-
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
@@ -122,7 +67,6 @@ function updateRuntimeDebug(extra=''){
 }
 console.log('ATELIER DEBUG 02 loaded');
 
-const IS_MOBILE_RENDER=matchMedia('(pointer:coarse)').matches || innerWidth<768;
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
@@ -641,7 +585,6 @@ let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
 let activeWorkId=null;
 let activeWorkCoverUrl=null;
-const ARTWORK_HOLD_MS=24*60*60*1000;
 let workPromptSprite=null;
 let workPromptTexture=null;
 let workPromptCanvas=null;
@@ -706,7 +649,6 @@ let extEnvMixer=null;
 let snowSystem=null;
 let snowPositions=null;
 let snowVelocities=null;
-const SNOW_COUNT=IS_MOBILE_RENDER?420:850;
 let snowEnabled=true;
 
 // Pavilion controller constants.
@@ -4437,9 +4379,9 @@ Promise.all([
   restoreSavedArtwork();
   await fetchServerState();
   startRealtimeSync();
-  heartbeatTimer=setInterval(serverHeartbeat,5000);
-  presencePulseTimer=setInterval(serverPresencePulse,1000);
-  presencePollTimer=setInterval(fetchPresenceOnly,2500);
+  heartbeatTimer=setInterval(serverHeartbeat,HEARTBEAT_MS);
+  presencePulseTimer=setInterval(serverPresencePulse,PRESENCE_PULSE_MS);
+  presencePollTimer=setInterval(fetchPresenceOnly,PRESENCE_POLL_MS);
   serverPresencePulse();
   fetchPresenceOnly();
   await refreshAuthSession();
