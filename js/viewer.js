@@ -523,6 +523,7 @@ let blockedPromptUntil=0;
 const WORK_PROMPTS=IS_KO?['작업 중...','오늘 작업한 그림을 올려볼까요?']:['Work in progress...','Want to post what you worked on today?'];
 const ACTIVE_WORK_PROMPTS=IS_KO?['작업 중...','그림 바꾸기']:['Work in progress...','Replace artwork'];
 let furnitureScene=null;
+let galleryBridgeGroup=null;
 
 // NPC atelier residents.
 const npcs=[];
@@ -887,12 +888,12 @@ function setAvatarFacing(dir){
 
 const WALKABLE_GEOMETRY={
   walkRadius:WALK_RADIUS,
-  bridgeHalfWidth:BRIDGE_HALF_WIDTH,
+  bridgeHalfWidth:BRIDGE_HALF_WIDTH+.28,
   bridgeAngle:BRIDGE_ANGLE,
   bridgeOffsetX:BRIDGE_OFFSET_X,
   bridgeOffsetZ:BRIDGE_OFFSET_Z,
-  bridgeStartZ:BRIDGE_START_Z,
-  bridgeEndZ:BRIDGE_END_Z,
+  bridgeStartZ:BRIDGE_START_Z-.45,
+  bridgeEndZ:BRIDGE_END_Z+.45,
   galleryCenterZ:GALLERY_CENTER_Z,
   galleryHalfWidth:GALLERY_HALF_WIDTH,
   galleryHalfDepth:GALLERY_HALF_DEPTH
@@ -3390,6 +3391,46 @@ function tryPreviewClickedArtwork(){
   return false;
 }
 
+function tryMoveOnBridgeOrGallery(){
+  if(!galleryBridgeGroup || !avatarRoot)return false;
+  const hits=raycaster.intersectObject(galleryBridgeGroup,true);
+  if(!hits.length)return false;
+
+  const hit=hits[0];
+  const local=galleryBridgeGroup.worldToLocal(hit.point.clone());
+  const y=avatarRoot.position.y;
+
+  let targetLocalX=local.x;
+  let targetLocalZ=local.z;
+
+  // Any click on the visible bridge, rails, sign or future lot should resolve
+  // to a safe walkable point instead of relying on the camera-to-ground plane.
+  if(targetLocalZ<=BRIDGE_END_Z+.6){
+    targetLocalX=THREE.MathUtils.clamp(targetLocalX,-BRIDGE_HALF_WIDTH*.72,BRIDGE_HALF_WIDTH*.72);
+    targetLocalZ=THREE.MathUtils.clamp(targetLocalZ,BRIDGE_START_Z+.25,BRIDGE_END_Z-.25);
+  }else{
+    targetLocalX=THREE.MathUtils.clamp(targetLocalX,-GALLERY_HALF_WIDTH+.45,GALLERY_HALF_WIDTH-.45);
+    targetLocalZ=THREE.MathUtils.clamp(
+      targetLocalZ,
+      GALLERY_CENTER_Z-GALLERY_HALF_DEPTH+.45,
+      GALLERY_CENTER_Z+GALLERY_HALF_DEPTH-.45
+    );
+  }
+
+  const destination=bridgeLocalToWorld(
+    targetLocalX,
+    targetLocalZ,
+    WALKABLE_GEOMETRY,
+    y
+  );
+
+  releasePlayerSeat();
+  setMoveRoute(destination);
+  playAvatar('Avatar_Walk');
+  showStatus(t('다리 쪽으로 이동 중','Walking toward the bridge'));
+  return true;
+}
+
 function setClickTarget(clientX,clientY){
   if(!avatarRoot)return;
 
@@ -3410,6 +3451,10 @@ function setClickTarget(clientX,clientY){
 
   // Stool/easel gets priority over the floor: click either to walk there and sit.
   if(trySitOnClickedStool())return;
+
+  // Bridge/gallery are real 3D objects. Raycast them directly so mobile
+  // perspective never converts a visible bridge tap into an invalid ground point.
+  if(tryMoveOnBridgeOrGallery())return;
 
   const hit=new THREE.Vector3();
   if(!raycaster.ray.intersectPlane(groundPlane,hit))return;
@@ -3924,6 +3969,7 @@ Promise.all([
 function createBridgeAndGalleryLot(){
   const bridgeGroup=new THREE.Group();
   bridgeGroup.name='Gallery Bridge Prototype';
+  galleryBridgeGroup=bridgeGroup;
   bridgeGroup.position.set(BRIDGE_OFFSET_X,0,BRIDGE_OFFSET_Z);
   bridgeGroup.rotation.y=BRIDGE_ANGLE;
 
@@ -3951,6 +3997,7 @@ function createBridgeAndGalleryLot(){
     new THREE.BoxGeometry(BRIDGE_HALF_WIDTH*2,0.18,bridgeLength),
     woodMat
   );
+  deck.name='Gallery Bridge Deck';
   deck.position.set(0,-.02,bridgeMidZ);
   deck.receiveShadow=true;
   deck.castShadow=true;
@@ -3984,6 +4031,7 @@ function createBridgeAndGalleryLot(){
     new THREE.CylinderGeometry(5.8,5.8,.22,48),
     stoneMat
   );
+  lot.name='Gallery Future Lot';
   lot.position.set(0,-.03,GALLERY_CENTER_Z);
   lot.receiveShadow=true;
   bridgeGroup.add(lot);
