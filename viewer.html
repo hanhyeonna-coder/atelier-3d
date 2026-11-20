@@ -288,10 +288,11 @@ function updateRuntimeDebug(extra=''){
 }
 console.log('ATELIER DEBUG 02 loaded');
 
+const IS_MOBILE_RENDER=matchMedia('(pointer:coarse)').matches || innerWidth<768;
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setPixelRatio(Math.min(devicePixelRatio,IS_MOBILE_RENDER?1.35:2));
 renderer.setSize(innerWidth,innerHeight);
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -310,7 +311,7 @@ scene.add(hemi);
 const sun=new THREE.DirectionalLight(0xffddb5,1.72);
 sun.position.set(-8,10,-4);
 sun.castShadow=true;
-sun.shadow.mapSize.set(2048,2048);
+sun.shadow.mapSize.set(IS_MOBILE_RENDER?1024:2048,IS_MOBILE_RENDER?1024:2048);
 sun.shadow.camera.near=.5;
 sun.shadow.camera.far=35;
 sun.shadow.camera.left=-9;
@@ -806,7 +807,7 @@ let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
 let activeWorkId=null;
 let activeWorkCoverUrl=null;
-const ARTWORK_HOLD_MS=5*60*1000;
+const ARTWORK_HOLD_MS=60*60*1000;
 let workPromptSprite=null;
 let workPromptTexture=null;
 let workPromptCanvas=null;
@@ -871,7 +872,7 @@ let extEnvMixer=null;
 let snowSystem=null;
 let snowPositions=null;
 let snowVelocities=null;
-const SNOW_COUNT=850;
+const SNOW_COUNT=IS_MOBILE_RENDER?420:850;
 let snowEnabled=true;
 
 // Pavilion controller constants.
@@ -1037,6 +1038,8 @@ function hasNamedAncestor(o,token){
   return false;
 }
 
+const animatedWaterMaterials=[];
+
 function enhanceMaterials(root){
   root.traverse(o=>{
     if(!o.isMesh)return;
@@ -1161,6 +1164,7 @@ function enhanceMaterials(root){
         }
 
         o.userData.waterMaterial=water;
+        animatedWaterMaterials.push(water);
         o.castShadow=false;
         o.receiveShadow=true;
         return;
@@ -2452,7 +2456,6 @@ function updateProximityNameLabels(){
 }
 
 function cleanupOrphanRemoteRoots(){
-  const valid=new Set(remoteAvatars.values());
   for(const child of [...scene.children]){
     const id=child?.userData?.remoteClientId;
     if(!id)continue;
@@ -3204,6 +3207,16 @@ function remainingLockMinutes(seat){
   return Math.max(1,Math.ceil(ms/60000));
 }
 
+function remainingExhibitionText(seat){
+  const minutes=remainingLockMinutes(seat);
+  if(minutes>=60){
+    const hours=Math.floor(minutes/60);
+    const rest=minutes%60;
+    return rest ? `${hours}시간 ${rest}분` : `${hours}시간`;
+  }
+  return `${minutes}분`;
+}
+
 function isArtworkLocked(seat){
   return !!seat && (seat.artworkLockedUntil||0)>Date.now();
 }
@@ -3290,7 +3303,6 @@ function releasePlayerSeat(){
   pendingPlayerSeat=null;
   if(avatarModel){
     recolorBeret(avatarModel,standingPlayerHatColor());
-  refreshStandingAvatarColors();
     refreshStandingAvatarColors();
   }
 }
@@ -3779,7 +3791,7 @@ async function requestPlayerSeat(seat){
   }
 
   if(isArtworkLocked(seat) && !isMyArtworkSeat(seat)){
-    showStatus(`작품 전시 중 · 약 ${remainingLockMinutes(seat)}분 후 이용할 수 있어요`,3000);
+    showStatus(`작품 전시 중 · ${remainingExhibitionText(seat)} 뒤부터 이 이젤에 내 그림을 올릴 수 있어요`,3600);
     return true;
   }
 
@@ -4592,8 +4604,8 @@ Promise.all([
   await fetchServerState();
   startRealtimeSync();
   heartbeatTimer=setInterval(serverHeartbeat,5000);
-  presencePulseTimer=setInterval(serverPresencePulse,250);
-  presencePollTimer=setInterval(fetchPresenceOnly,500);
+  presencePulseTimer=setInterval(serverPresencePulse,1000);
+  presencePollTimer=setInterval(fetchPresenceOnly,2500);
   serverPresencePulse();
   fetchPresenceOnly();
   await refreshAuthSession();
@@ -4984,7 +4996,7 @@ function tick(){
   updateRemoteMotion(dt);
   updateProximityNameLabels();
 
-  updateNPCs(dt,performance.now()/1000);
+  if(npcs.length)updateNPCs(dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
   if(extEnvMixer)extEnvMixer.update(dt);
   updateBoatMotion(dt);
@@ -4998,20 +5010,19 @@ function tick(){
     updateRuntimeDebug((FORCE_NIGHT?'forced night ':'night ')+nightFactor.toFixed(2));
   }
 
-  // Layered moving ripples. Each exported water mesh owns its material clone.
-  scene.traverse(o=>{
-    const waterMaterial=o.userData?.waterMaterial;
-    if(!waterMaterial?.normalMap)return;
-
+  // Animate only known water materials; avoid traversing the entire scene every frame.
+  const rippleNow=performance.now();
+  for(const waterMaterial of animatedWaterMaterials){
+    if(!waterMaterial?.normalMap)continue;
     waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.075)%1;
     waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.042)%1;
     waterMaterial.normalScale.set(
-      1.22+Math.sin(performance.now()*0.0017)*0.14,
-      1.10+Math.cos(performance.now()*0.0013)*0.14
+      1.22+Math.sin(rippleNow*0.0017)*0.14,
+      1.10+Math.cos(rippleNow*0.0013)*0.14
     );
     waterMaterial.clearcoatRoughness=
-      0.035+Math.sin(performance.now()*0.0015)*0.01;
-  });
+      0.035+Math.sin(rippleNow*0.0015)*0.01;
+  }
 
   updateWorkTimer(dt);
   updateArtworkLocks();
