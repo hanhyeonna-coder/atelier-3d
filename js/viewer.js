@@ -19,6 +19,7 @@ import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,save
 import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fetchPresence,deletePresence} from './multiplayer-api.js';
 import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
 import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
+import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
 
 applyLocaleUI();
 
@@ -536,6 +537,8 @@ let workPromptTexture=null;
 let workPromptCanvas=null;
 let workPromptCtx=null;
 let workPromptIndex=-1;
+let blockedPromptSeat=null;
+let blockedPromptUntil=0;
 const WORK_PROMPTS=['작업 중...','오늘 작업한 그림을 올려볼까요?'];
 let furnitureScene=null;
 
@@ -639,8 +642,8 @@ function loadGLB(url){
   }));
 }
 function loadOptionalGLB(url){
-  return loadGLB(url).catch(()=>{
-    assetLoadErrors.push(url.split('/').pop());
+  return loadGLB(url).catch(error=>{
+    console.warn('[ATELIER] Optional model unavailable:',url,error);
     return null;
   });
 }
@@ -2855,25 +2858,6 @@ function makeStoredArtworkDataUrl(img){
   return c.toDataURL('image/jpeg',.82);
 }
 
-function remainingLockMinutes(seat){
-  const ms=Math.max(0,(seat?.artworkLockedUntil||0)-Date.now());
-  return Math.max(1,Math.ceil(ms/60000));
-}
-
-function remainingExhibitionText(seat){
-  const minutes=remainingLockMinutes(seat);
-  if(minutes>=60){
-    const hours=Math.floor(minutes/60);
-    const rest=minutes%60;
-    return rest ? `${hours}시간 ${rest}분` : `${hours}시간`;
-  }
-  return `${minutes}분`;
-}
-
-function isArtworkLocked(seat){
-  return !!seat && (seat.artworkLockedUntil||0)>Date.now();
-}
-
 function applySavedArtworkLock(){
   if(savedArtworkSeatIndex===null)return;
   const seat=seatSlots.find(s=>s.index===savedArtworkSeatIndex);
@@ -3201,7 +3185,7 @@ function openArtworkPickerForSeat(seat){
     seatHasVisibleArtwork(seat) &&
     !isLegacyInlineArtworkSeat(seat)
   ){
-    showStatus('다른 사람의 작품은 수정할 수 없어요');
+    showStatus(blockedEaselStatus(seat),4200); blockedPromptSeat=seat; blockedPromptUntil=performance.now()+12000;
     return true;
   }
 
@@ -3434,7 +3418,7 @@ async function requestPlayerSeat(seat){
   }
 
   if(isArtworkLocked(seat) && !isMyArtworkSeat(seat)){
-    showStatus(`작품 전시 중 · ${remainingExhibitionText(seat)} 뒤부터 이 이젤에 내 그림을 올릴 수 있어요`,3600);
+    showStatus(blockedEaselStatus(seat),4200); blockedPromptSeat=seat; blockedPromptUntil=performance.now()+12000;
     return true;
   }
 
@@ -3839,23 +3823,32 @@ function drawWorkPrompt(text){
 function updateWorkPrompt(){
   ensureWorkPrompt();
 
-  if(!playerSeat){
+  const now=performance.now();
+  const blockedActive=
+    blockedPromptSeat &&
+    blockedPromptUntil>now &&
+    isArtworkLocked(blockedPromptSeat);
+
+  const targetSeat=blockedActive?blockedPromptSeat:playerSeat;
+  if(!targetSeat){
     workPromptSprite.visible=false;
     workPromptIndex=-1;
+    blockedPromptSeat=null;
     return;
   }
 
-  const prompts = (playerArtworkSeat===playerSeat)
-    ? ['작업 중...','그림 바꾸기']
-    : WORK_PROMPTS;
-  const idx=Math.floor(performance.now()/3500)%prompts.length;
-  const promptKey=idx+'|'+prompts[idx];
+  const prompts=blockedActive
+    ? blockedEaselPrompts(targetSeat)
+    : ((playerArtworkSeat===playerSeat)?['작업 중...','그림 바꾸기']:WORK_PROMPTS);
+
+  const idx=Math.floor(now/3500)%prompts.length;
+  const promptKey=(blockedActive?'blocked|':'work|')+idx+'|'+prompts[idx];
   if(promptKey!==workPromptIndex){
     workPromptIndex=promptKey;
     drawWorkPrompt(prompts[idx]);
   }
 
-  const box=new THREE.Box3().setFromObject(playerSeat.easel);
+  const box=new THREE.Box3().setFromObject(targetSeat.easel);
   const center=box.getCenter(new THREE.Vector3());
   workPromptSprite.position.set(center.x,box.max.y+.62,center.z);
   workPromptSprite.visible=true;
