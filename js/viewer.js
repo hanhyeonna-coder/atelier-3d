@@ -31,9 +31,8 @@ import {getLikeCount,getUserLike,addLike,removeLike} from './likes-api.js';
 applyLocaleUI();
 
 const loadingCopiesKo=[
-  '화실에 입장하는 중...',
-  '오늘도 같이 그림 그리자...',
-  '누군가 네 그림을 기다리고 있어'
+  '좀쓰 화실에 온 걸 환영한다',
+  '조금이라도 그려라, 그리고 흔적 남겨라'
 ];
 const loadingCopiesEn=[
   'Entering the atelier...',
@@ -3269,24 +3268,19 @@ let cameraDragActive=false;
 
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 
-renderer.domElement.addEventListener('pointerdown',e=>{
-  if(e.button===0){
-    // Left click is reserved for movement / interaction only.
-    pointerDown=true;
-    dragged=false;
-    downX=lastX=e.clientX;
-    downY=lastY=e.clientY;
-    renderer.domElement.setPointerCapture?.(e.pointerId);
-    return;
-  }
+renderer.domElement.addEventListener('click',e=>{
+  // Left click has one job only: move / interact.
+  if(e.button!==0)return;
+  setClickTarget(e.clientX,e.clientY);
+});
 
-  if(e.button===2){
-    // Camera orbit is explicit: right-button drag only.
-    cameraDragActive=true;
-    lastX=e.clientX;
-    lastY=e.clientY;
-    renderer.domElement.setPointerCapture?.(e.pointerId);
-  }
+renderer.domElement.addEventListener('pointerdown',e=>{
+  if(e.button!==2)return;
+  // Camera orbit is explicit: right-button drag only.
+  cameraDragActive=true;
+  lastX=e.clientX;
+  lastY=e.clientY;
+  renderer.domElement.setPointerCapture?.(e.pointerId);
 });
 
 renderer.domElement.addEventListener('pointermove',e=>{
@@ -3301,25 +3295,12 @@ renderer.domElement.addEventListener('pointermove',e=>{
 });
 
 renderer.domElement.addEventListener('pointerup',e=>{
-  if(e.button===0){
-    if(pointerDown){
-      setClickTarget(e.clientX,e.clientY);
-    }
-    pointerDown=false;
-    dragged=false;
-    renderer.domElement.releasePointerCapture?.(e.pointerId);
-    return;
-  }
-
-  if(e.button===2){
-    cameraDragActive=false;
-    renderer.domElement.releasePointerCapture?.(e.pointerId);
-  }
+  if(e.button!==2)return;
+  cameraDragActive=false;
+  renderer.domElement.releasePointerCapture?.(e.pointerId);
 });
 
 renderer.domElement.addEventListener('pointercancel',e=>{
-  pointerDown=false;
-  dragged=false;
   cameraDragActive=false;
   renderer.domElement.releasePointerCapture?.(e.pointerId);
 });
