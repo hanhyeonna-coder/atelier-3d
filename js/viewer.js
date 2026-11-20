@@ -52,21 +52,6 @@ setTimeout(()=>centerHint.classList.remove('show'),10200);
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
 
-const runtimeDebug=document.getElementById('runtimeDebug');
-const assetLoadErrors=[];
-window.__ATELIER_DEBUG_VERSION='DEBUG 02';
-function updateRuntimeDebug(extra=''){
-  if(!runtimeDebug)return;
-  const windows=Array.isArray(window.__debugNightWindows)?window.__debugNightWindows.length:0;
-  const flowers=Array.isArray(window.__debugFlowerLights)?window.__debugFlowerLights.length:0;
-  const stars=typeof starField!=='undefined' && starField?.children ? starField.children.reduce((n,layer)=>n+(layer.geometry?.attributes?.position?.count||0),0) : 0;
-  const wNames=(window.__debugNightWindows||[]).slice(0,2).map(o=>o.name).join(', ');
-  const fNames=(window.__debugFlowerLights||[]).slice(0,2).map(x=>x.anchor?.name||'').join(', ');
-  runtimeDebug.textContent='DEBUG 02\nwindows: '+windows+'\nflowers: '+flowers+'\nstars: '+stars+
-    (wNames?'\nW: '+wNames:'')+(fNames?'\nF: '+fNames:'')+(extra?'\n'+extra:'')+(assetLoadErrors.length?'\nFAILED: '+assetLoadErrors.join(', '):'');
-}
-console.log('ATELIER DEBUG 02 loaded');
-
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
 const renderer=new THREE.WebGLRenderer({antialias:true});
@@ -359,9 +344,7 @@ function registerNightWindows(root){
     nightWindowMeshes.push(o);
   });
 
-  window.__debugNightWindows=[...nightWindowMeshes];
-  console.log('Registered night windows:',nightWindowMeshes.length,nightWindowMeshes.map(o=>o.name));
-  updateRuntimeDebug('windows registered');
+    console.log('Registered night windows:',nightWindowMeshes.length,nightWindowMeshes.map(o=>o.name));
 }
 
 function makeWarmGlowTexture(){
@@ -450,9 +433,7 @@ function registerFlowerNightLights(lightRoot,flowerRoot){
     flowerNightLights.push({anchor,light,halo});
   }
 
-  window.__debugFlowerLights=[...flowerNightLights];
-  console.log('Registered flower night lights:',flowerNightLights.length,anchors.map(o=>o.name));
-  updateRuntimeDebug('flowers registered');
+    console.log('Registered flower night lights:',flowerNightLights.length,anchors.map(o=>o.name));
 }
 
 function updateRegisteredNightLights(factor){
@@ -695,7 +676,6 @@ function loadGLB(url){
 function loadOptionalGLB(url){
   return loadGLB(url).catch(()=>{
     assetLoadErrors.push(url.split('/').pop());
-    updateRuntimeDebug('model load failed');
     return null;
   });
 }
@@ -4320,7 +4300,6 @@ Promise.all([
   registerNightWindows(scene);
   registerFlowerNightLights(flowerLightRoot,flowerGLB?.scene||envGLB.scene);
   updateDayNightLighting(true);
-  updateRuntimeDebug('assets loaded');
 
   createBridgeAndGalleryLot();
   createAtmosphericClouds();
@@ -4761,7 +4740,6 @@ function updateBoatMotion(dt){
   if(boatMixer)boatMixer.update(dt);
 }
 
-let lastRuntimeDebugUpdate=0;
 function tick(){
   requestAnimationFrame(tick);
 
@@ -4780,11 +4758,6 @@ function tick(){
   updateSnow(dt);
   updateDayNightLighting();
   updateStarTwinkle(performance.now());
-  const dbgNow=performance.now();
-  if(dbgNow-lastRuntimeDebugUpdate>1000){
-    lastRuntimeDebugUpdate=dbgNow;
-    updateRuntimeDebug((FORCE_NIGHT?'forced night ':'night ')+nightFactor.toFixed(2));
-  }
 
   // Animate only known water materials; avoid traversing the entire scene every frame.
   const rippleNow=performance.now();
