@@ -478,32 +478,21 @@ const NPC_HAT_COLORS=[
 
 const hatColorPool=[...NPC_HAT_COLORS];
 
-function hatColorForSeatIndex(index){
-  return hatColorPool[((index%hatColorPool.length)+hatColorPool.length)%hatColorPool.length];
-}
-
-function standingHatColorForClient(id){
-  const index=Math.abs(hashString(id))%hatColorPool.length;
+function stableHatColorForClient(id){
+  const index=Math.abs(hashString(id||''))%hatColorPool.length;
   return new THREE.Color(hatColorPool[index]);
 }
 
-function liveStandingColorForClient(id){
-  const ids=[clientId,...remoteAvatars.keys()].filter(Boolean).sort();
-  const index=Math.max(0,ids.indexOf(id));
-  return new THREE.Color(hatColorPool[index%hatColorPool.length]);
-}
-
 function standingPlayerHatColor(){
-  return liveStandingColorForClient(clientId);
+  return stableHatColorForClient(clientId);
 }
 
 function refreshStandingAvatarColors(){
-  if(avatarModel && !playerSeat && !pendingPlayerSeat){
-    recolorBeret(avatarModel,liveStandingColorForClient(clientId));
+  if(avatarModel){
+    recolorBeret(avatarModel,stableHatColorForClient(clientId));
   }
   for(const [id,entry] of remoteAvatars){
-    if(Number.isFinite(entry.seatIndex))continue;
-    recolorBeret(entry.model,liveStandingColorForClient(id));
+    recolorBeret(entry.model,stableHatColorForClient(id));
   }
 }
 
@@ -1444,12 +1433,18 @@ function syncRemoteAvatars(){
   }
 
   for(const [id,seat] of wanted){
-    let entry=ensureRemoteAvatar(id,{seatIndex:seat.index});
+    const entry=ensureRemoteAvatar(id,{seatIndex:seat.index});
     if(!entry)continue;
-    recolorBeret(entry.model,hatColorForSeatIndex(seat.index));
+    recolorBeret(entry.model,stableHatColorForClient(id));
 
     const motion=remoteMotion.get(id);
-    if(!motion || motion.state==='working'){
+    const freshMotion=
+      motion &&
+      performance.now()-(motion.receivedAt||0)<1600;
+
+    // Claiming a stool happens before the remote player finishes walking there.
+    // Never snap them to the stool until their own realtime state says "working".
+    if(freshMotion && motion.state==='working'){
       entry.targetPosition.copy(seat.position);
       entry.targetYaw=Math.atan2(seat.faceDir.x,seat.faceDir.z)+MODEL_YAW_CORRECTION+SIT_YAW_CORRECTION;
       entry.root.position.copy(seat.position);
@@ -1593,12 +1588,17 @@ function makeNameLabel(text){
 
 function setAvatarNameLabel(root,text){
   if(!root || !text)return;
-  const old=root.getObjectByName('Player Name Label');
-  if(old?.userData?.labelText===text)return;
-  if(old){
-    old.material?.map?.dispose?.();
-    old.material?.dispose?.();
-    root.remove(old);
+  const existing=[];
+  root.traverse(child=>{
+    if(child?.name==='Player Name Label')existing.push(child);
+  });
+
+  if(existing.length===1 && existing[0].userData?.labelText===text)return;
+
+  for(const label of existing){
+    label.material?.map?.dispose?.();
+    label.material?.dispose?.();
+    label.parent?.remove(label);
   }
   root.add(makeNameLabel(text));
 }
@@ -1621,14 +1621,10 @@ function ensureRemoteAvatar(id,state={}){
     const initialLabel=root.getObjectByName('Player Name Label');
     if(initialLabel)initialLabel.visible=false;
     remoteAvatars.set(id,entry);
-    refreshStandingAvatarColors();
+    recolorBeret(entry.model,stableHatColorForClient(id));
   }
   entry.seatIndex=Number.isFinite(state.seatIndex)?state.seatIndex:null;
-  if(Number.isFinite(entry.seatIndex)){
-    recolorBeret(entry.model,hatColorForSeatIndex(entry.seatIndex));
-  }else{
-    refreshStandingAvatarColors();
-  }
+  recolorBeret(entry.model,stableHatColorForClient(id));
   if(state.displayName){
     entry.displayName=state.displayName;
     if((entry.greetingUntil||0)<=performance.now()){
@@ -1661,23 +1657,36 @@ function applyPresenceRows(rows){
     });
     if(!entry)continue;
 
-    entry.targetPosition.set(row.x,0,row.z);
-    if(Number.isFinite(row.yaw))entry.targetYaw=row.yaw;
+    const realtime=remoteMotion.get(row.client_id);
+    const hasFreshRealtime=
+      realtime &&
+      performance.now()-(realtime.receivedAt||0)<1600;
 
-    // First sighting must start at the actual remote coordinate, never at pavilion center.
-    if(!entry.lastMotionAt){
-      entry.root.position.copy(entry.targetPosition);
-      entry.root.rotation.y=entry.targetYaw;
-    }
-    entry.lastMotionAt=performance.now();
+    entry.remoteState=row.state||entry.remoteState||'idle';
+    entry.lastPresenceAt=performance.now();
 
-    if(row.state==='working'){
-      playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
-    }else{
-      if(!Number.isFinite(row.seat_index))entry.seatIndex=null; refreshStandingAvatarColors();
-      if(row.state==='walking')playRemote(entry,'Avatar_Walk');
-      else playRemote(entry,'Avatar_Idle');
+    // Realtime broadcast is authoritative for motion. Database presence is only
+    // a fallback so older coordinates never yank the avatar backwards.
+    if(!hasFreshRealtime){
+      entry.targetPosition.set(row.x,0,row.z);
+      if(Number.isFinite(row.yaw))entry.targetYaw=row.yaw;
+
+      if(!entry.lastMotionAt){
+        entry.root.position.copy(entry.targetPosition);
+        entry.root.rotation.y=entry.targetYaw;
+      }
+      entry.lastMotionAt=performance.now();
+
+      if(row.state==='working'){
+        playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
+      }else if(row.state==='walking'){
+        playRemote(entry,'Avatar_Walk');
+      }else{
+        playRemote(entry,'Avatar_Idle');
+      }
     }
+
+    if(!Number.isFinite(row.seat_index))entry.seatIndex=null;
   }
 }
 
@@ -1702,7 +1711,6 @@ async function fetchPresenceOnly(){
     if(!freshIds.has(id) && !seated){
       disposeRemoteAvatar(entry);
       remoteMotion.delete(id);
-      refreshStandingAvatarColors();
     }
   }
 
@@ -1745,11 +1753,12 @@ function handleRemoteMotion(message){
   entry.targetPosition.set(p.x,0,p.z);
   entry.targetYaw=Number.isFinite(p.yaw)?p.yaw:entry.root.rotation.y;
   entry.lastMotionAt=performance.now();
+  entry.remoteState=p.state||'idle';
 
   if(p.state==='working'){
     playRemote(entry,entry.actions['Avatar_Paint']?'Avatar_Paint':'Avatar_Sit');
   }else{
-    if(!Number.isFinite(p.seatIndex))entry.seatIndex=null; refreshStandingAvatarColors();
+    if(!Number.isFinite(p.seatIndex))entry.seatIndex=null;
     if(p.state==='walking')playRemote(entry,'Avatar_Walk');
     else playRemote(entry,'Avatar_Idle');
   }
@@ -2637,7 +2646,6 @@ function releasePlayerSeat(){
   pendingPlayerSeat=null;
   if(avatarModel){
     recolorBeret(avatarModel,standingPlayerHatColor());
-    refreshStandingAvatarColors();
   }
 }
 
