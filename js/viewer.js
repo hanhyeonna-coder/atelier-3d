@@ -472,6 +472,15 @@ function updateDayNightLighting(force=false){
       .lerp(new THREE.Color(0x718092),nightFactor);
   }
 
+  const rimColor=new THREE.Color('#dff4ff')
+    .lerp(new THREE.Color('#ffd2a8'),sunsetFactor*.92)
+    .lerp(new THREE.Color('#b8d6ff'),nightFactor*.72);
+  const rimOpacity=THREE.MathUtils.lerp(.20,.31,Math.max(sunsetFactor,nightFactor));
+  for(const mat of glassRimMaterials){
+    mat.uniforms.uColor.value.copy(rimColor);
+    mat.uniforms.uOpacity.value=rimOpacity;
+  }
+
   updateRegisteredNightLights(nightFactor);
 }
 updateDayNightLighting(true);
@@ -641,6 +650,43 @@ function hasNamedAncestor(o,token){
 }
 
 const animatedWaterMaterials=[];
+const glassRimMaterials=[];
+
+function makeGlassRimMaterial(){
+  return new THREE.ShaderMaterial({
+    name:'Atelier Glass Rim',
+    transparent:true,
+    depthWrite:false,
+    depthTest:true,
+    side:THREE.DoubleSide,
+    blending:THREE.NormalBlending,
+    uniforms:{
+      uColor:{value:new THREE.Color('#dff4ff')},
+      uOpacity:{value:.22}
+    },
+    vertexShader:`
+      varying vec3 vNormalV;
+      varying vec3 vViewDirV;
+      void main(){
+        vec4 mvPosition=modelViewMatrix*vec4(position,1.0);
+        vNormalV=normalize(normalMatrix*normal);
+        vViewDirV=normalize(-mvPosition.xyz);
+        gl_Position=projectionMatrix*mvPosition;
+      }
+    `,
+    fragmentShader:`
+      varying vec3 vNormalV;
+      varying vec3 vViewDirV;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      void main(){
+        float fresnel=pow(1.0-abs(dot(normalize(vNormalV),normalize(vViewDirV))),2.15);
+        float alpha=smoothstep(.10,.95,fresnel)*uOpacity;
+        gl_FragColor=vec4(uColor,alpha);
+      }
+    `
+  });
+}
 
 function enhanceMaterials(root){
   root.traverse(o=>{
@@ -704,21 +750,23 @@ function enhanceMaterials(root){
           isEaselPart
         ) && !isActualCanvas;
 
-      // GLASS: subtle clear greenhouse glass, not a foggy overlay.
+      // GLASS: warm storybook greenhouse glass. Keep it clear, but visibly glass.
       if(isGlass){
         const glass=new THREE.MeshPhysicalMaterial({
-          name:'Atelier Clear Glass',
-          color:new THREE.Color('#f4fbff'),
+          name:'Atelier Warm Glass',
+          color:new THREE.Color('#dceef2'),
           transparent:true,
-          opacity:0.10,
-          transmission:0.22,
-          roughness:0.07,
+          opacity:0.20,
+          transmission:0.48,
+          roughness:0.12,
           metalness:0,
-          ior:1.45,
-          thickness:0.08,
+          ior:1.47,
+          thickness:0.16,
           clearcoat:1,
-          clearcoatRoughness:0.05,
-          envMapIntensity:0.85,
+          clearcoatRoughness:0.035,
+          envMapIntensity:1.65,
+          attenuationColor:new THREE.Color('#e6f7f4'),
+          attenuationDistance:3.6,
           side:THREE.DoubleSide,
           depthWrite:false,
           depthTest:true
@@ -730,6 +778,18 @@ function enhanceMaterials(root){
           o.material=glass;
         }
 
+        // A very cheap Fresnel-like rim overlay makes the dome edges read as glass,
+        // especially at night, without changing the Blender asset.
+        if(!o.getObjectByName('Glass Rim Overlay')){
+          const rim=new THREE.Mesh(o.geometry,makeGlassRimMaterial());
+          rim.name='Glass Rim Overlay';
+          rim.renderOrder=(o.renderOrder||0)+2;
+          rim.scale.setScalar(1.0015);
+          o.add(rim);
+          glassRimMaterials.push(rim.material);
+        }
+
+        o.renderOrder=Math.max(o.renderOrder||0,10);
         o.castShadow=false;
         o.receiveShadow=false;
         return;
