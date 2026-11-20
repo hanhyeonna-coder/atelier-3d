@@ -77,7 +77,8 @@ export function createWorkPromptController(scene){
     blockedPromptUntil,
     isArtworkLocked,
     blockedEaselPrompts,
-    workPrompts
+    workPrompts,
+    activeWorkPrompts
   }){
     ensure();
     const now=performance.now();
@@ -94,7 +95,7 @@ export function createWorkPromptController(scene){
 
     const prompts=blockedActive
       ? blockedEaselPrompts(targetSeat)
-      : ((playerArtworkSeat===playerSeat)?['작업 중...','그림 바꾸기']:workPrompts);
+      : ((playerArtworkSeat===playerSeat)?activeWorkPrompts:workPrompts);
 
     const idx=Math.floor(now/3500)%prompts.length;
     const nextKey=(blockedActive?'blocked|':'work|')+idx+'|'+prompts[idx];
