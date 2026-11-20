@@ -329,16 +329,65 @@ const waterCloudReflections=[];
 
 function makeStarGlowTexture(){
   const c=document.createElement('canvas');
-  c.width=c.height=128;
+  c.width=c.height=256;
   const ctx=c.getContext('2d');
-  const g=ctx.createRadialGradient(64,64,1,64,64,60);
-  g.addColorStop(0,'rgba(255,255,232,1)');
-  g.addColorStop(.10,'rgba(255,245,190,.95)');
-  g.addColorStop(.32,'rgba(255,222,135,.55)');
-  g.addColorStop(.65,'rgba(255,205,105,.20)');
-  g.addColorStop(1,'rgba(255,190,90,0)');
-  ctx.fillStyle=g;
-  ctx.fillRect(0,0,128,128);
+  const cx=128,cy=128;
+
+  // Wide warm halo.
+  const halo=ctx.createRadialGradient(cx,cy,2,cx,cy,124);
+  halo.addColorStop(0,'rgba(255,255,235,1)');
+  halo.addColorStop(.10,'rgba(255,247,195,.98)');
+  halo.addColorStop(.28,'rgba(255,228,140,.72)');
+  halo.addColorStop(.55,'rgba(255,210,110,.32)');
+  halo.addColorStop(.82,'rgba(255,195,90,.10)');
+  halo.addColorStop(1,'rgba(255,185,80,0)');
+  ctx.fillStyle=halo;
+  ctx.fillRect(0,0,256,256);
+
+  // Soft cross-shaped light rays.
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.globalCompositeOperation='lighter';
+
+  const drawRay=(angle,w,h,alpha)=>{
+    ctx.save();
+    ctx.rotate(angle);
+    const g=ctx.createLinearGradient(0,-h/2,0,h/2);
+    g.addColorStop(0,'rgba(255,246,210,0)');
+    g.addColorStop(.42,'rgba(255,246,210,'+(alpha*.35)+')');
+    g.addColorStop(.5,'rgba(255,255,238,'+alpha+')');
+    g.addColorStop(.58,'rgba(255,246,210,'+(alpha*.35)+')');
+    g.addColorStop(1,'rgba(255,246,210,0)');
+    ctx.fillStyle=g;
+    ctx.fillRect(-w/2,-h/2,w,h);
+    ctx.restore();
+  };
+
+  drawRay(0,12,174,.96);
+  drawRay(Math.PI/2,12,174,.96);
+  drawRay(Math.PI/4,7,112,.58);
+  drawRay(-Math.PI/4,7,112,.58);
+
+  // Bright 4-point star core.
+  ctx.beginPath();
+  const outer=32,inner=7;
+  for(let i=0;i<8;i++){
+    const a=-Math.PI/2+i*Math.PI/4;
+    const r=i%2===0?outer:inner;
+    const x=Math.cos(a)*r;
+    const y=Math.sin(a)*r;
+    if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  ctx.fillStyle='rgba(255,255,238,1)';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(0,0,8,0,Math.PI*2);
+  ctx.fillStyle='#fffdf0';
+  ctx.fill();
+  ctx.restore();
+
   const tex=new THREE.CanvasTexture(c);
   tex.colorSpace=THREE.SRGBColorSpace;
   tex.minFilter=THREE.LinearFilter;
@@ -433,16 +482,34 @@ function updateStarTwinkle(nowMs){
   if(!starField.visible)return;
   const t=nowMs*.001;
   const nightOpacity=Math.max(0,(nightFactor-.12)/.88);
-  for(const layer of starField.children){
+
+  for(let layerIndex=0;layerIndex<starField.children.length;layerIndex++){
+    const layer=starField.children[layerIndex];
     const attr=layer.geometry.attributes.color;
     const {baseColor,phases,speeds}=layer.userData;
+
+    let avgWave=0;
     for(let i=0;i<attr.count;i++){
       const wave=.5+.5*Math.sin(t*speeds[i]+phases[i]);
-      const brightness=.52+.60*wave;
-      attr.setXYZ(i,baseColor.r*brightness,baseColor.g*brightness,baseColor.b*brightness);
+      avgWave+=wave;
+
+      // Make the individual sparkle visibly pulse warm-white.
+      const brightness=.28+1.35*Math.pow(wave,1.7);
+      attr.setXYZ(
+        i,
+        Math.min(1,baseColor.r*brightness),
+        Math.min(1,baseColor.g*brightness),
+        Math.min(1,baseColor.b*brightness)
+      );
     }
+    avgWave/=Math.max(1,attr.count);
     attr.needsUpdate=true;
-    layer.material.opacity=nightOpacity*.95;
+
+    // Every star cluster breathes at a different tempo as well.
+    const layerWave=.5+.5*Math.sin(t*(.38+layerIndex*.073)+layerIndex*1.37);
+    layer.material.opacity=nightOpacity*(.50+.50*layerWave);
+    const baseSize=layer.userData.basePointSize||(layer.userData.basePointSize=layer.material.size);
+    layer.material.size=baseSize*(.82+.48*Math.pow(layerWave,2));
   }
 }
 
@@ -4406,13 +4473,29 @@ function createBridgeAndGalleryLot(){
   scene.add(bridgeGroup);
 }
 
-function randomSnowXZOutsidePavilion(){
-  let x=0,z=0;
-  do{
-    x=(Math.random()-.5)*30;
-    z=(Math.random()-.5)*30;
-  }while(Math.hypot(x,z)<WALK_RADIUS+1.0);
-  return [x,z];
+function chooseSnowCloud(){
+  if(!skyClouds.length)return null;
+  return skyClouds[Math.floor(Math.random()*skyClouds.length)];
+}
+
+function snowSpawnFromCloud(i,initial=false){
+  const cloud=chooseSnowCloud();
+  if(!cloud)return null;
+
+  cloud.updateMatrixWorld(true);
+  const cpos=cloud.getWorldPosition(new THREE.Vector3());
+  const spread=1.7+Math.random()*1.8;
+
+  const x=cpos.x+(Math.random()-.5)*spread*2;
+  const z=cpos.z+(Math.random()-.5)*spread*2;
+
+  // New flakes originate just under the cloud.
+  // Initial fill distributes some flakes lower so snow is already visible immediately.
+  const y=initial
+    ? THREE.MathUtils.lerp(.35,cpos.y-.35,Math.random())
+    : cpos.y-.25-Math.random()*.45;
+
+  return {x,y,z,cloud};
 }
 
 function createSnowSystem(){
@@ -4422,23 +4505,29 @@ function createSnowSystem(){
 
   for(let i=0;i<SNOW_COUNT;i++){
     const j=i*3;
-    const [sx,sz]=randomSnowXZOutsidePavilion();
-    snowPositions[j]=sx;
-    snowPositions[j+1]=Math.random()*13+1.5;
-    snowPositions[j+2]=sz;
+    const spawn=snowSpawnFromCloud(i,true);
+    if(spawn){
+      snowPositions[j]=spawn.x;
+      snowPositions[j+1]=spawn.y;
+      snowPositions[j+2]=spawn.z;
+    }else{
+      snowPositions[j]=(Math.random()-.5)*30;
+      snowPositions[j+1]=Math.random()*10+2;
+      snowPositions[j+2]=(Math.random()-.5)*30;
+    }
 
     const k=i*2;
-    snowVelocities[k]=.45+Math.random()*.75;
-    snowVelocities[k+1]=(.05+Math.random()*.22)*(Math.random()<.5?-1:1);
+    snowVelocities[k]=.38+Math.random()*.62;
+    snowVelocities[k+1]=(.03+Math.random()*.16)*(Math.random()<.5?-1:1);
   }
 
   geometry.setAttribute('position',new THREE.BufferAttribute(snowPositions,3));
 
   const material=new THREE.PointsMaterial({
     color:0xffffff,
-    size:.055,
+    size:.075,
     transparent:true,
-    opacity:.72,
+    opacity:.58,
     depthWrite:false,
     sizeAttenuation:true
   });
@@ -4463,23 +4552,13 @@ function updateSnow(dt){
     pos[j+1]-= snowVelocities[k] * dt;
     pos[j+2]+= Math.sin((performance.now()*.0005)+(i*.37))*.018*dt;
 
-    if(Math.hypot(pos[j],pos[j+2])<WALK_RADIUS+.8){
-      const [sx,sz]=randomSnowXZOutsidePavilion();
-      pos[j]=sx;
-      pos[j+2]=sz;
-    }
-
-    if(pos[j+1]<-.15){
-      const [sx,sz]=randomSnowXZOutsidePavilion();
-      pos[j]=sx;
-      pos[j+1]=Math.random()*5+10;
-      pos[j+2]=sz;
-    }
-
-    if(pos[j]>15 || pos[j]<-15 || pos[j+2]>15 || pos[j+2]<-15){
-      const [sx,sz]=randomSnowXZOutsidePavilion();
-      pos[j]=sx;
-      pos[j+2]=sz;
+    if(pos[j+1]<-.15 || pos[j]>18 || pos[j]<-18 || pos[j+2]>18 || pos[j+2]<-18){
+      const spawn=snowSpawnFromCloud(i,false);
+      if(spawn){
+        pos[j]=spawn.x;
+        pos[j+1]=spawn.y;
+        pos[j+2]=spawn.z;
+      }
     }
   }
 
