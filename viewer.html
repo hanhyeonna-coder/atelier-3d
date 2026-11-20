@@ -1,20 +1,20 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>좀비 화실</title>
+<title>Zombie Atelier</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
 <link rel="stylesheet" href="./styles/viewer.css"/>
 
 </head>
 <body>
 <div id="app"></div>
-<div id="loading"><div id="loadingMessage">화실에 입장하는 중...</div></div>
+<div id="loading"><div id="loadingMessage">Zombie Atelier</div></div>
 <div id="timerPanel"><span id="workTimer">Today 0 min</span></div>
 <div id="topActions">
-  <button id="historyBtn">내 그림 진행 기록</button>
-  <button id="accountBtn" aria-label="내 계정" title="내 계정">👤</button>
+  <button id="historyBtn">My Work</button>
+  <button id="accountBtn" aria-label="My account" title="My account">👤</button>
 </div>
 <div id="controlHint"></div>
 <div id="centerHint"></div>
@@ -22,21 +22,21 @@
 <input id="artUpload" type="file" accept="image/png,image/jpeg,image/webp" style="display:none"/>
 <div id="artModal">
   <div id="artCard">
-    <button id="artClose" aria-label="닫기">×</button>
-    <img id="artPreview" alt="작품 크게 보기"/>
+    <button id="artClose" aria-label="Close">×</button>
+    <img id="artPreview" alt="Large artwork preview"/>
     <div id="artMeta"></div>
-    <div id="artLikeRow"><button id="artLikeBtn" type="button"><span class="heart">♡</span><span class="label">좋아요</span><span class="count">0</span></button></div>
+    <div id="artLikeRow"><button id="artLikeBtn" type="button"><span class="heart">♡</span><span class="label">Like</span><span class="count">0</span></button></div>
     <div id="artArchiveSection">
-      <div id="artArchiveTitle">완성 작품 보관함</div>
+      <div id="artArchiveTitle">Finished works</div>
       <div id="artArchiveGrid"></div>
     </div>
   </div>
 </div>
 <div id="historyModal">
   <div id="historyCard">
-    <button id="historyClose" aria-label="닫기">×</button>
+    <button id="historyClose" aria-label="Close">×</button>
     <div id="currentProgressSection">
-      <div id="historySummary">현재 작품 진행 과정</div>
+      <div id="historySummary">Current work in progress</div>
       <div id="historyGrid">
         <div id="progressStage">
           <div id="progressCarousel"></div>
@@ -44,22 +44,22 @@
         </div>
       </div>
       <div id="progressActions">
-        <button id="completeWorkBtn">작품 완성하고 보관하기</button>
-        <button id="deleteCurrentWorkBtn">이 작품 폐기하기</button>
+        <button id="completeWorkBtn">Mark as finished</button>
+        <button id="deleteCurrentWorkBtn">Discard this work</button>
       </div>
     </div>
-    <div id="completedTitle">완성 작품 보관함</div>
+    <div id="completedTitle">Finished works</div>
     <div id="completedGrid"></div>
   </div>
 </div>
 <div id="accountModal">
   <div id="accountCard">
-    <button id="accountClose" aria-label="닫기">×</button>
-    <div id="accountTitle">내 아틀리에 계정</div>
-    <div id="accountDesc">이메일로 로그인하면 폰과 컴퓨터에서 같은 작품 진행 기록을 이어볼 수 있어요.</div>
-    <input id="accountEmail" type="email" autocomplete="email" placeholder="이메일 주소"/>
-    <button id="accountAction">로그인 링크 받기</button>
-    <button id="logoutBtn" style="display:none">로그아웃</button>
+    <button id="accountClose" aria-label="Close">×</button>
+    <div id="accountTitle">My Zombie Atelier Account</div>
+    <div id="accountDesc">Sign in with your email to keep the same artwork history across your phone and computer.</div>
+    <input id="accountEmail" type="email" autocomplete="email" placeholder="Email address"/>
+    <button id="accountAction">Email me a sign-in link</button>
+    <button id="logoutBtn" style="display:none">Sign out</button>
     <div id="accountState"></div>
   </div>
 </div>
