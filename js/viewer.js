@@ -3,7 +3,6 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import {createClient} from '@supabase/supabase-js';
 
 import {
   loading,loadingMessage,controlHint,centerHint,workTimer,artUpload,artModal,artPreview,artMeta,
@@ -15,6 +14,8 @@ import {
 import {
   IS_MOBILE_RENDER,ARTWORK_HOLD_MS,PRESENCE_PULSE_MS,PRESENCE_POLL_MS,HEARTBEAT_MS,SNOW_COUNT
 } from './config.js';
+import {supabase,SUPABASE_URL} from './backend.js';
+import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName} from './identity.js';
 
 applyLocaleUI();
 
@@ -489,53 +490,14 @@ dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/
 loader.setDRACOLoader(dracoLoader);
 const clock=new THREE.Clock();
 
-const SUPABASE_URL='https://uuotlmljzvludygzrvvt.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_QXfhaLNfkXUs13Pe8u7wYQ_V9F2low4';
-const supabase=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
-const CLIENT_ID_KEY='atelier3d_client_id';
-let clientId=localStorage.getItem(CLIENT_ID_KEY);
-if(!clientId){
-  clientId=crypto.randomUUID();
-  localStorage.setItem(CLIENT_ID_KEY,clientId);
-}
+const clientId=getOrCreateClientId();
 let ownerId=clientId;
 let currentUser=null;
 let artworkSaveQueue=Promise.resolve();
 let progressSlides=[];
 let progressSlideIndex=0;
 let previewWorkId=null;
-const ARTIST_NAMES_KO=['고흐','피카소','모네','마티스','클림트','고갱','세잔','르누아르','샤갈','미로','달리','칸딘스키','뭉크','마네','드가'];
-const ARTIST_QUIRKS_KO=['발가락 만지는','귀가 가려운','졸린 눈 비비는','커피 식은 줄 모르는','붓 어디 뒀는지 까먹은','창밖만 보는','하품 참는','콧노래 부르는','양말 한 짝 잃어버린','배고픈','딴생각하는','손에 물감 묻은','허리 펴는','연필 씹는','구름 세는'];
-const ARTIST_NAMES_EN=['Van Gogh','Picasso','Monet','Matisse','Klimt','Gauguin','Cezanne','Renoir','Chagall','Miro','Dali','Kandinsky','Munch','Manet','Degas'];
-const ARTIST_QUIRKS_EN=['Toe-Tapping','Itchy-Eared','Sleepy-Eyed','Coffee-Cold','Brush-Lost','Window-Gazing','Holding-a-Yawn','Humming','One-Sock-Missing','Hungry','Daydreaming','Paint-Smudged','Stretching','Pencil-Chewing','Cloud-Counting'];
-
-function hashString(str){
-  let h=2166136261;
-  for(let i=0;i<str.length;i++){
-    h^=str.charCodeAt(i);
-    h=Math.imul(h,16777619);
-  }
-  return h>>>0;
-}
-
-const DISPLAY_NAME_KEY='atelier3d_display_name';
-function makeLocalizedDisplayName(id){
-  const h=hashString(id);
-  const names=IS_KO?ARTIST_NAMES_KO:ARTIST_NAMES_EN;
-  const quirks=IS_KO?ARTIST_QUIRKS_KO:ARTIST_QUIRKS_EN;
-  const artist=names[h%names.length];
-  const quirk=quirks[Math.floor(h/names.length)%quirks.length];
-  return `${quirk} ${artist}`;
-}
-let displayName=localStorage.getItem(DISPLAY_NAME_KEY);
-const needsLocaleRefresh=
-  !displayName ||
-  (IS_KO && !/[가-힣]/.test(displayName)) ||
-  (!IS_KO && /[가-힣]/.test(displayName));
-if(needsLocaleRefresh){
-  displayName=makeLocalizedDisplayName(clientId);
-  localStorage.setItem(DISPLAY_NAME_KEY,displayName);
-}
+let displayName=getOrCreateDisplayName(clientId,IS_KO);
 const remoteAvatars=new Map();
 let realtimeChannel=null;
 let heartbeatTimer=null;
@@ -2267,8 +2229,8 @@ async function adoptGuestDataIntoAccount(user){
   if(profileError)console.warn('profile lookup',profileError);
 
   if(profile?.display_name){
-    displayName=makeLocalizedDisplayName(user.id);
-    localStorage.setItem(DISPLAY_NAME_KEY,displayName);
+    displayName=makeLocalizedDisplayName(user.id,IS_KO);
+    saveDisplayName(displayName);
     if(profile.display_name!==displayName){
       const {error:profileRenameError}=await supabase
         .from('atelier_profiles')
@@ -2277,8 +2239,8 @@ async function adoptGuestDataIntoAccount(user){
       if(profileRenameError)console.warn('profile localized rename',profileRenameError);
     }
   }else{
-    displayName=makeLocalizedDisplayName(user.id);
-    localStorage.setItem(DISPLAY_NAME_KEY,displayName);
+    displayName=makeLocalizedDisplayName(user.id,IS_KO);
+    saveDisplayName(displayName);
     const {error:profileInsertError}=await supabase
       .from('atelier_profiles')
       .insert({user_id:user.id,display_name:displayName});
