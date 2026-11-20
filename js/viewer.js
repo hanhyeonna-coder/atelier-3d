@@ -25,6 +25,7 @@ import {normalizeAvatarOrientation,normalizeAvatarOrigin,isolateAvatarMaterials,
 import {constrainWalkable as constrainWalkableByConfig,facingYaw} from './movement-geometry.js';
 import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
+import {createWorkPromptController} from './work-prompt.js';
 
 applyLocaleUI();
 
@@ -61,6 +62,7 @@ setTimeout(()=>{
 setTimeout(()=>centerHint.classList.remove('show'),10200);
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xd8e6ee);
+const workPromptController=createWorkPromptController(scene);
 
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
@@ -453,11 +455,6 @@ let savedArtworkSeatIndex=null;
 let savedArtworkLockedUntil=0;
 let activeWorkId=null;
 let activeWorkCoverUrl=null;
-let workPromptSprite=null;
-let workPromptTexture=null;
-let workPromptCanvas=null;
-let workPromptCtx=null;
-let workPromptIndex=-1;
 let blockedPromptSeat=null;
 let blockedPromptUntil=0;
 const WORK_PROMPTS=['작업 중...','오늘 작업한 그림을 올려볼까요?'];
@@ -3367,113 +3364,6 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 
-function ensureWorkPrompt(){
-  if(workPromptSprite)return;
-
-  workPromptCanvas=document.createElement('canvas');
-  workPromptCanvas.width=16;
-  workPromptCanvas.height=180;
-  workPromptCtx=workPromptCanvas.getContext('2d');
-  workPromptTexture=new THREE.CanvasTexture(workPromptCanvas);
-  workPromptTexture.colorSpace=THREE.SRGBColorSpace;
-
-  const mat=new THREE.SpriteMaterial({
-    map:workPromptTexture,
-    transparent:true,
-    depthTest:false,
-    depthWrite:false
-  });
-  workPromptSprite=new THREE.Sprite(mat);
-  workPromptSprite.name='Work Prompt';
-  workPromptSprite.renderOrder=50;
-  workPromptSprite.visible=false;
-  scene.add(workPromptSprite);
-}
-
-function drawWorkPrompt(text){
-  ensureWorkPrompt();
-
-  const font='700 54px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif';
-  const measure=document.createElement('canvas').getContext('2d');
-  measure.font=font;
-
-  const textWidth=Math.ceil(measure.measureText(text).width);
-  const padX=48;
-  const w=Math.max(220,textWidth+padX*2);
-  const h=180;
-
-  const c=document.createElement('canvas');
-  c.width=w;
-  c.height=h;
-  const ctx=c.getContext('2d');
-
-  ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='rgba(255,255,255,.90)';
-  ctx.strokeStyle='rgba(93,70,54,.28)';
-  ctx.lineWidth=5;
-  ctx.beginPath();
-  ctx.roundRect(12,12,w-24,h-24,52);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle='#4c3a30';
-  ctx.font=font;
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
-  ctx.fillText(text,w/2,h/2+1);
-
-  const freshTexture=new THREE.CanvasTexture(c);
-  freshTexture.colorSpace=THREE.SRGBColorSpace;
-  freshTexture.needsUpdate=true;
-
-  const oldTexture=workPromptSprite.material.map;
-  workPromptSprite.material.map=freshTexture;
-  workPromptSprite.material.needsUpdate=true;
-  if(oldTexture)oldTexture.dispose();
-
-  workPromptTexture=freshTexture;
-  workPromptCanvas=c;
-  workPromptCtx=ctx;
-
-  const worldHeight=.56;
-  const worldWidth=worldHeight*(w/h);
-  workPromptSprite.scale.set(worldWidth,worldHeight,1);
-}
-
-function updateWorkPrompt(){
-  ensureWorkPrompt();
-
-  const now=performance.now();
-  const blockedActive=
-    blockedPromptSeat &&
-    blockedPromptUntil>now &&
-    isArtworkLocked(blockedPromptSeat);
-
-  const targetSeat=blockedActive?blockedPromptSeat:playerSeat;
-  if(!targetSeat){
-    workPromptSprite.visible=false;
-    workPromptIndex=-1;
-    blockedPromptSeat=null;
-    return;
-  }
-
-  const prompts=blockedActive
-    ? blockedEaselPrompts(targetSeat)
-    : ((playerArtworkSeat===playerSeat)?['작업 중...','그림 바꾸기']:WORK_PROMPTS);
-
-  const idx=Math.floor(now/3500)%prompts.length;
-  const promptKey=(blockedActive?'blocked|':'work|')+idx+'|'+prompts[idx];
-  if(promptKey!==workPromptIndex){
-    workPromptIndex=promptKey;
-    drawWorkPrompt(prompts[idx]);
-  }
-
-  const box=new THREE.Box3().setFromObject(targetSeat.easel);
-  const center=box.getCenter(new THREE.Vector3());
-  workPromptSprite.position.set(center.x,box.max.y+.62,center.z);
-  workPromptSprite.visible=true;
-}
-
 function updateWorkTimer(dt){
   if(playerSeat){
     workElapsedSeconds+=dt;
@@ -4258,7 +4148,15 @@ function tick(){
 
   updateWorkTimer(dt);
   updateArtworkLocks();
-  updateWorkPrompt();
+  workPromptController.update({
+    playerSeat,
+    playerArtworkSeat,
+    blockedPromptSeat,
+    blockedPromptUntil,
+    isArtworkLocked,
+    blockedEaselPrompts,
+    workPrompts:WORK_PROMPTS
+  });
   updateMovement(dt);
   updateCamera();
 
