@@ -406,11 +406,23 @@ function createStarField(){
   const palette=[0xfff7d6,0xffefb3,0xffe49a,0xfff2c2];
   for(let i=0;i<10;i++){
     group.add(makeClusteredStarLayer(
-      38+Math.floor(Math.random()*24),
-      .035+Math.random()*.075,
+      42+Math.floor(Math.random()*28),
+      .055+Math.random()*.10,
       palette[i%palette.length],
       .60+Math.random()*.28
     ));
+  }
+  for(let i=0;i<3;i++){
+    const hero=makeClusteredStarLayer(
+      14+Math.floor(Math.random()*8),
+      .16+Math.random()*.09,
+      i%2?0xffe7a6:0xfff6cf,
+      .45+Math.random()*.22
+    );
+    hero.userData.twinkleStrength=.34+Math.random()*.18;
+    hero.userData.twinkleSpeed=.22+Math.random()*.35;
+    hero.userData.baseOpacity=.72+Math.random()*.18;
+    group.add(hero);
   }
   scene.add(group);
   return group;
@@ -1377,6 +1389,70 @@ function forceEaselWoodMaterials(root){
 
     mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
   });
+}
+function forceEaselTopClampsByGeometry(root){
+  if(!root)return;
+
+  const easels=collectNamedRoots(root,o=>normalizedAssetName(o.name).startsWith('easel'));
+  for(const easel of easels){
+    easel.updateMatrixWorld(true);
+
+    const meshes=[];
+    easel.traverse(o=>{ if(o.isMesh && o.material)meshes.push(o); });
+    if(!meshes.length)continue;
+
+    const canvasCandidates=meshes.filter(o=>{
+      const on=normalizedAssetName(o.name);
+      const mats=Array.isArray(o.material)?o.material:[o.material];
+      return on.includes('canvas') || mats.some(m=>normalizedAssetName(m?.name).includes('canvas'));
+    });
+    if(!canvasCandidates.length)continue;
+
+    canvasCandidates.sort((a,b)=>{
+      const sa=new THREE.Box3().setFromObject(a).getSize(new THREE.Vector3());
+      const sb=new THREE.Box3().setFromObject(b).getSize(new THREE.Vector3());
+      return (sb.x*sb.y+sb.x*sb.z+sb.y*sb.z)-(sa.x*sa.y+sa.x*sa.z+sa.y*sa.z);
+    });
+    const canvas=canvasCandidates[0];
+    const cbox=new THREE.Box3().setFromObject(canvas);
+    const ccenter=cbox.getCenter(new THREE.Vector3());
+    const csize=cbox.getSize(new THREE.Vector3());
+
+    for(const mesh of meshes){
+      if(mesh===canvas)continue;
+      const box=new THREE.Box3().setFromObject(mesh);
+      const center=box.getCenter(new THREE.Vector3());
+      const size=box.getSize(new THREE.Vector3());
+
+      const isAboveCanvas=
+        center.y > cbox.max.y - csize.y*.08 &&
+        center.y < cbox.max.y + csize.y*.28;
+      const horizontallyAligned=
+        Math.abs(center.x-ccenter.x) < Math.max(csize.x,csize.z)*.42 &&
+        Math.abs(center.z-ccenter.z) < Math.max(csize.x,csize.z)*.42;
+      const isSmall=
+        Math.max(size.x,size.y,size.z) < Math.max(csize.x,csize.y,csize.z)*.30;
+
+      if(!(isAboveCanvas && horizontallyAligned && isSmall))continue;
+
+      const source=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+      const fixed=source.map(mat=>{
+        if(!mat)return mat;
+        const m=mat.clone();
+        if(m.color)m.color.set('#6f4228');
+        if('roughness' in m)m.roughness=.58;
+        if('metalness' in m)m.metalness=0;
+        if('transmission' in m)m.transmission=0;
+        m.transparent=false;
+        m.opacity=1;
+        m.depthWrite=true;
+        m.needsUpdate=true;
+        return m;
+      });
+      mesh.material=Array.isArray(mesh.material)?fixed:fixed[0];
+      mesh.userData.atelierClampFixed=true;
+    }
+  }
 }
 
 function keepOnlyFurniture(root){
@@ -4117,6 +4193,7 @@ Promise.all([
     keepOnlyFurniture(furnitureGLB.scene);
     enhanceMaterials(furnitureGLB.scene);
     forceEaselWoodMaterials(furnitureGLB.scene);
+    forceEaselTopClampsByGeometry(furnitureGLB.scene);
 
     scene.add(furnitureGLB.scene);
     keepFurnitureInsidePavilion(furnitureGLB.scene);
