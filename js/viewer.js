@@ -13,7 +13,7 @@ import {
   IS_MOBILE_RENDER,ARTWORK_HOLD_MS,PRESENCE_PULSE_MS,PRESENCE_POLL_MS,HEARTBEAT_MS,SNOW_COUNT
 } from './config.js';
 import {supabase,SUPABASE_URL} from './backend.js';
-import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName} from './identity.js';
+import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName,hashString} from './identity.js';
 import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fetchPresence,deletePresence} from './multiplayer-api.js';
 import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
 import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
