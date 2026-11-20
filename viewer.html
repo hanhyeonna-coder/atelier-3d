@@ -86,6 +86,13 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
 #artLikeBtn .count{font-size:13px;min-width:12px;text-align:left}
 #artLikeBtn.liked{background:#ffe6ec;color:#b73557}
 #artLikeBtn:disabled{opacity:.45;cursor:default}
+#artArchiveSection{display:none;margin-top:18px;padding-top:16px;border-top:1px solid rgba(93,73,61,.14)}
+#artArchiveTitle{font-size:14px;font-weight:900;color:#42362f;margin-bottom:10px}
+#artArchiveGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;max-height:220px;overflow:auto;padding-bottom:2px}
+.artArchiveItem{background:#f3eee9;border-radius:12px;padding:7px;cursor:pointer}
+.artArchiveItem.active{outline:2px solid rgba(93,73,61,.45)}
+.artArchiveItem img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#fff;border-radius:8px;display:block}
+.artArchiveMeta{font-size:10px;color:#6b5a50;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #artClose{position:absolute;right:10px;top:8px;border:0;background:rgba(255,255,255,.92);width:32px;height:32px;border-radius:16px;font-size:20px;cursor:pointer}
 
 </style>
@@ -108,6 +115,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9e6ef;fon
     <img id="artPreview" alt="작품 크게 보기"/>
     <div id="artMeta"></div>
     <div id="artLikeRow"><button id="artLikeBtn" type="button"><span class="heart">♡</span><span class="label">좋아요</span><span class="count">0</span></button></div>
+    <div id="artArchiveSection">
+      <div id="artArchiveTitle">완성 작품 보관함</div>
+      <div id="artArchiveGrid"></div>
+    </div>
   </div>
 </div>
 <div id="historyModal">
@@ -171,6 +182,9 @@ const artModal=document.getElementById('artModal');
 const artPreview=document.getElementById('artPreview');
 const artMeta=document.getElementById('artMeta');
 const artLikeBtn=document.getElementById('artLikeBtn');
+const artArchiveSection=document.getElementById('artArchiveSection');
+const artArchiveTitle=document.getElementById('artArchiveTitle');
+const artArchiveGrid=document.getElementById('artArchiveGrid');
 const artClose=document.getElementById('artClose');
 const historyBtn=document.getElementById('historyBtn');
 const historyModal=document.getElementById('historyModal');
@@ -3344,13 +3358,80 @@ async function refreshPreviewLikeState(){
   artLikeBtn.innerHTML=`<span class="heart">${liked?'♥':'♡'}</span><span class="label">${t('좋아요','Like')}</span><span class="count">${count}</span>`;
 }
 
+async function renderCompletedArchiveForPreview(workId){
+  artArchiveSection.style.display='none';
+  artArchiveGrid.innerHTML='';
+  if(!workId)return;
+
+  const {data:work,error:workError}=await supabase
+    .from('atelier_works')
+    .select('id,owner_id,status,cover_image_url,completed_at,total_work_seconds')
+    .eq('id',workId)
+    .maybeSingle();
+
+  if(workError){
+    console.warn('preview work lookup',workError);
+    return;
+  }
+  if(!work || work.status!=='completed' || !work.owner_id)return;
+
+  const {data:completed,error:completedError}=await supabase
+    .from('atelier_works')
+    .select('id,cover_image_url,completed_at,total_work_seconds')
+    .eq('owner_id',work.owner_id)
+    .eq('status','completed')
+    .order('completed_at',{ascending:false})
+    .limit(50);
+
+  if(completedError){
+    console.warn('preview completed archive',completedError);
+    return;
+  }
+  if(!completed?.length)return;
+
+  artArchiveTitle.textContent=t('완성 작품 보관함','Completed artworks');
+  artArchiveSection.style.display='block';
+
+  for(const item of completed){
+    if(!item.cover_image_url)continue;
+    const card=document.createElement('div');
+    card.className='artArchiveItem'+(item.id===workId?' active':'');
+    const img=document.createElement('img');
+    img.src=item.cover_image_url;
+    img.alt=t('완성 작품','Completed artwork');
+    const metaEl=document.createElement('div');
+    metaEl.className='artArchiveMeta';
+    const when=item.completed_at?new Date(item.completed_at):null;
+    metaEl.textContent=when
+      ? `${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`
+      : formatTodayWork(item.total_work_seconds||0);
+    card.append(img,metaEl);
+    card.addEventListener('click',async ()=>{
+      previewWorkId=item.id;
+      artPreview.src=item.cover_image_url;
+      artMeta.textContent=when
+        ? t(`완성 작품 · ${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`,`Completed · ${when.toLocaleDateString()} · ${formatTodayWork(item.total_work_seconds||0)}`)
+        : t('완성 작품','Completed artwork');
+      artArchiveGrid.querySelectorAll('.artArchiveItem').forEach(el=>el.classList.remove('active'));
+      card.classList.add('active');
+      await refreshPreviewLikeState();
+    });
+    artArchiveGrid.appendChild(card);
+  }
+}
+
 async function openArtworkModal(src,meta,workId=null){
   if(!src)return false;
   previewWorkId=workId||null;
   artPreview.src=src;
   artMeta.textContent=meta||'';
+  artArchiveSection.style.display='none';
+  artArchiveGrid.innerHTML='';
   artModal.classList.add('show');
-  await refreshPreviewLikeState();
+  await Promise.all([
+    refreshPreviewLikeState(),
+    renderCompletedArchiveForPreview(previewWorkId)
+  ]);
   return true;
 }
 
@@ -3423,6 +3504,8 @@ function closeArtworkPreview(){
   artPreview.removeAttribute('src');
   previewWorkId=null;
   artLikeBtn.style.display='none';
+  artArchiveSection.style.display='none';
+  artArchiveGrid.innerHTML='';
 }
 
 artClose.addEventListener('click',closeArtworkPreview);
