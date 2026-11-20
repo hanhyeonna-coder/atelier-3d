@@ -21,7 +21,7 @@ import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,
 import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
 import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
 import {formatDuration,formatTodayWork} from './time-format.js';
-import {normalizeAvatarOrientation,normalizeAvatarOrigin,isolateAvatarMaterials,recolorBeret} from './avatar-utils.js';
+import {normalizeAvatarOrigin,isolateAvatarMaterials,recolorBeret} from './avatar-utils.js';
 import {constrainWalkable as constrainWalkableByConfig,facingYaw} from './movement-geometry.js';
 import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
@@ -3243,9 +3243,7 @@ function updateCamera(){
 }
 
 function tryClickWorkPrompt(){
-  if(!playerSeat || !workPromptSprite?.visible)return false;
-  const hits=raycaster.intersectObject(workPromptSprite,false);
-  if(!hits.length)return false;
+  if(!playerSeat || !workPromptController.hitTest(raycaster))return false;
   openArtworkPickerForSeat(playerSeat);
   return true;
 }
