@@ -1,20 +1,27 @@
 import * as THREE from 'three';
 
 export function toBridgeLocal(v,config){
+  // Three.js Y rotation:
+  // world.x = local.x*cos(a) + local.z*sin(a)
+  // world.z = -local.x*sin(a) + local.z*cos(a)
+  // Inverse rotation uses -a.
   const px=v.x-config.bridgeOffsetX;
   const pz=v.z-config.bridgeOffsetZ;
-  const c=Math.cos(-config.bridgeAngle);
-  const sn=Math.sin(-config.bridgeAngle);
-  return {x:px*c-pz*sn,z:px*sn+pz*c};
+  const c=Math.cos(config.bridgeAngle);
+  const sn=Math.sin(config.bridgeAngle);
+  return {
+    x:px*c-pz*sn,
+    z:px*sn+pz*c
+  };
 }
 
 export function bridgeLocalToWorld(x,z,config,y=0){
   const c=Math.cos(config.bridgeAngle);
   const sn=Math.sin(config.bridgeAngle);
   return new THREE.Vector3(
-    config.bridgeOffsetX + x*c - z*sn,
+    config.bridgeOffsetX + x*c + z*sn,
     y,
-    config.bridgeOffsetZ + x*sn + z*c
+    config.bridgeOffsetZ - x*sn + z*c
   );
 }
 
