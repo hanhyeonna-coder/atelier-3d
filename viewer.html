@@ -1424,10 +1424,12 @@ function forceEaselWoodMaterials(root){
       if(!mat)return mat;
       const materialName=normalizedAssetName(mat.name);
 
+      const isNamedEaselClamp=/^easel\s+\d+\s+clamp(?:\s+\d+)?$/.test(objectName);
+
       const forceWood=
         materialName==='dark oak' ||
         materialName==='warm oak' ||
-        objectName.includes('clamp') ||
+        isNamedEaselClamp ||
         objectName.includes('clip') ||
         objectName.includes('holder') ||
         objectName.includes('support') ||
