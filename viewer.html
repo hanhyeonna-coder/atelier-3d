@@ -2083,10 +2083,14 @@ function applyServerArtworks(rows){
 
     seat.serverArtworkOwner=row.owner_id||null;
 
-    if(row.owner_id===ownerId)continue;
-
+    // Always keep server artwork identity on the seat, including my own row.
+    // This is required after a work is completed: the exhibition remains visible,
+    // while activeWorkId is cleared, so clicking must still resolve the completed work.
     seat.userData.artworkMeta=(row.display_name||'Painter')+' · '+t('작업 ','work ')+Math.max(1,Math.round((row.work_seconds||0)/60))+t('분',' min');
     seat.userData.workId=row.work_id||null;
+    if(row.image_url)seat.userData.artworkDataUrl=row.image_url;
+
+    if(row.owner_id===ownerId)continue;
 
     // Keep an unchanged remote artwork on the canvas through seat claim/release refreshes.
     // This prevents a visitor who only sits down from making the displayed artwork vanish.
@@ -3483,12 +3487,15 @@ function openArtworkPreview(seat){
 
   const seatWorkId=seat?.userData?.workId||null;
   const isOwnActiveArtwork=
-    seat===playerArtworkSeat ||
-    (activeWorkId && seatWorkId===activeWorkId) ||
-    (seat?.serverArtworkOwner===ownerId && activeWorkId);
+    !!activeWorkId &&
+    (
+      seatWorkId===activeWorkId ||
+      (seat?.serverArtworkOwner===ownerId && !seatWorkId)
+    );
 
-  // My active easel should show the full progress history, not only the latest upload.
-  // Other artists' easels still open the single-artwork preview.
+  // Only the genuinely active work opens progress history.
+  // A completed work can remain exhibited on the same easel, but it must open
+  // as a completed artwork preview with the completed archive beneath it.
   if(isOwnActiveArtwork){
     loadMyHistory();
     return true;
