@@ -434,7 +434,11 @@ function updateStarTwinkle(nowMs){
   }
 }
 
+const debugParams=new URLSearchParams(location.search);
+const FORCE_NIGHT=debugParams.get('night')==='1';
+
 function computeNightFactor(){
+  if(FORCE_NIGHT)return 1;
   const d=new Date();
   const h=d.getHours()+d.getMinutes()/60;
   if(h>=20 || h<5)return 1;
@@ -4595,7 +4599,7 @@ function tick(){
   const dbgNow=performance.now();
   if(dbgNow-lastRuntimeDebugUpdate>1000){
     lastRuntimeDebugUpdate=dbgNow;
-    updateRuntimeDebug('night '+nightFactor.toFixed(2));
+    updateRuntimeDebug((FORCE_NIGHT?'forced night ':'night ')+nightFactor.toFixed(2));
   }
 
   // Layered moving ripples. Each exported water mesh owns its material clone.
