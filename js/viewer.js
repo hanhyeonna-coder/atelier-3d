@@ -16,6 +16,7 @@ import {
 } from './config.js';
 import {supabase,SUPABASE_URL} from './backend.js';
 import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName} from './identity.js';
+import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fetchPresence,deletePresence} from './multiplayer-api.js';
 
 applyLocaleUI();
 
@@ -1674,14 +1675,10 @@ function playerCandidateBlocked(candidate,minDistance=.64){
 }
 
 async function fetchServerState(){
-  const [{data:easels,error:e1},{data:artworks,error:e2},{data:presence,error:e3}]=await Promise.all([
-    supabase.from('atelier_easels').select('*').order('seat_index'),
-    supabase.from('atelier_artworks').select('*').order('seat_index'),
-    supabase.from('atelier_presence').select('*')
-  ]);
-  if(e1)console.warn('easel sync',e1);
-  if(e2)console.warn('artwork sync',e2);
-  if(e3)console.warn('presence sync',e3);
+  const {easels,artworks,presence,easelError,artworkError,presenceError}=await fetchWorldState(supabase);
+  if(easelError)console.warn('easel sync',easelError);
+  if(artworkError)console.warn('artwork sync',artworkError);
+  if(presenceError)console.warn('presence sync',presenceError);
   if(easels)applyServerEasels(easels);
   if(artworks)applyServerArtworks(artworks);
   if(presence)applyPresenceRows(presence);
@@ -1972,7 +1969,7 @@ function applyPresenceRows(rows){
 }
 
 async function fetchPresenceOnly(){
-  const {data,error}=await supabase.from('atelier_presence').select('*');
+  const {data,error}=await fetchPresence(supabase);
   if(error){console.warn('presence poll',error);return;}
 
   const rows=data||[];
@@ -2718,7 +2715,7 @@ historyModal.addEventListener('click',e=>{
 });
 
 async function serverClaimSeat(seat){
-  const {data,error}=await supabase.rpc('atelier_claim_easel',{p_seat_index:seat.index,p_client_id:clientId});
+  const {data,error}=await claimEasel(supabase,seat.index,clientId);
   if(error){console.warn(error);return false;}
   await fetchServerState();
   return data===true;
@@ -2726,8 +2723,8 @@ async function serverClaimSeat(seat){
 
 async function serverReleaseSeat(seat){
   if(!seat)return;
-  await supabase.rpc('atelier_release_easel',{p_seat_index:seat.index,p_client_id:clientId});
-  await supabase.from('atelier_presence').upsert({
+  await releaseEasel(supabase,seat.index,clientId);
+  await upsertPresence(supabase,{
     client_id:clientId,seat_index:null,state:'idle',work_seconds:Math.floor(workElapsedSeconds),
     display_name:displayName,last_seen:new Date().toISOString()
   });
@@ -2736,8 +2733,8 @@ async function serverReleaseSeat(seat){
 
 async function serverHeartbeat(){
   if(playerSeat){
-    await supabase.rpc('atelier_heartbeat',{p_seat_index:playerSeat.index,p_client_id:clientId});
-    await supabase.from('atelier_presence').upsert({
+    await heartbeatEasel(supabase,playerSeat.index,clientId);
+    await upsertPresence(supabase,{
       client_id:clientId,seat_index:playerSeat.index,state:'working',
       work_seconds:Math.floor(workElapsedSeconds),display_name:displayName,last_seen:new Date().toISOString()
     });
@@ -4748,7 +4745,7 @@ tick();
 addEventListener('beforeunload',()=>{
   saveProgress();
   syncDailyWorkToServer();
-  supabase.from('atelier_presence').delete().eq('client_id',clientId);
+  deletePresence(supabase,clientId);
   if(playerSeat){
     navigator.sendBeacon?.(
       SUPABASE_URL+'/rest/v1/rpc/atelier_release_easel',
