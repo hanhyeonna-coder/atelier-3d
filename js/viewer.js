@@ -17,6 +17,7 @@ import {
 import {supabase,SUPABASE_URL} from './backend.js';
 import {getOrCreateClientId,getOrCreateDisplayName,makeLocalizedDisplayName,saveDisplayName} from './identity.js';
 import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fetchPresence,deletePresence} from './multiplayer-api.js';
+import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
 
 applyLocaleUI();
 
@@ -2348,12 +2349,7 @@ supabase.auth.onAuthStateChange((_event,session)=>{
 async function findActiveWork(){
   if(activeWorkId)return activeWorkId;
 
-  const {data:existing,error:existingError}=await supabase
-    .from('atelier_works')
-    .select('*')
-    .eq('owner_id',ownerId)
-    .eq('status','active')
-    .maybeSingle();
+  const {data:existing,error:existingError}=await findActiveWorkRow(supabase,ownerId);
 
   if(existingError){
     console.warn('active work lookup',existingError);
@@ -2375,16 +2371,9 @@ async function ensureActiveWork(){
   const found=await findActiveWork();
   if(found)return found;
 
-  const {data:created,error:createError}=await supabase
-    .from('atelier_works')
-    .insert({
-      owner_id:ownerId,
-      display_name:displayName,
-      status:'active',
-      total_work_seconds:Math.floor(currentWorkElapsedSeconds)
-    })
-    .select()
-    .single();
+  const {data:created,error:createError}=await createActiveWorkRow(supabase,{
+    ownerId,displayName,totalWorkSeconds:currentWorkElapsedSeconds
+  });
 
   if(createError){
     console.warn('active work create',createError);
@@ -2397,24 +2386,8 @@ async function ensureActiveWork(){
 }
 
 async function uploadArtworkToStorage(dataUrl,workId){
-  const blob=await fetch(dataUrl).then(r=>r.blob());
-  const ext=blob.type==='image/png'?'png':(blob.type==='image/webp'?'webp':'jpg');
-  const path=`${ownerId}/${workId}/${Date.now()}.${ext}`;
-
-  const {error}=await supabase.storage
-    .from('atelier-artworks')
-    .upload(path,blob,{
-      contentType:blob.type||'image/jpeg',
-      cacheControl:'3600',
-      upsert:false
-    });
-
-  if(error)throw error;
-
-  const {data}=supabase.storage.from('atelier-artworks').getPublicUrl(path);
-  return {path,url:data.publicUrl};
+  return uploadArtworkFile(supabase,{ownerId,workId,dataUrl});
 }
-
 async function completeCurrentWork(){
   if(!currentUser){
     showStatus('작품을 보관하려면 계정을 먼저 만들어 주세요',2800);
@@ -2433,15 +2406,9 @@ async function completeCurrentWork(){
 
   completeWorkBtn.disabled=true;
 
-  const {error}=await supabase.from('atelier_works')
-    .update({
-      status:'completed',
-      completed_at:new Date().toISOString(),
-      total_work_seconds:Math.floor(currentWorkElapsedSeconds),
-      cover_image_url:activeWorkCoverUrl
-    })
-    .eq('id',workId)
-    .eq('owner_id',ownerId);
+  const {error}=await completeWorkRow(supabase,{
+    workId,ownerId,totalWorkSeconds:currentWorkElapsedSeconds,coverImageUrl:activeWorkCoverUrl
+  });
 
   if(error){
     console.warn('complete work',error);
@@ -2548,30 +2515,12 @@ async function loadMyHistory(){
 
   const workId=await findActiveWork();
 
-  const [
-    {data:history,error:hErr},
-    {data:daily,error:dErr},
-    {data:completed,error:cErr}
-  ]=await Promise.all([
-    workId
-      ? supabase.from('atelier_artwork_history')
-          .select('*')
-          .eq('work_id',workId)
-          .order('created_at',{ascending:true})
-          .limit(12)
-      : Promise.resolve({data:[],error:null}),
-    supabase.from('atelier_daily_work')
-      .select('*')
-      .eq('owner_id',ownerId)
-      .eq('work_date',localDateKey())
-      .maybeSingle(),
-    supabase.from('atelier_works')
-      .select('*')
-      .eq('owner_id',ownerId)
-      .eq('status','completed')
-      .order('completed_at',{ascending:false})
-      .limit(50)
-  ]);
+  const {historyRes,dailyRes,completedRes}=await fetchHistoryBundle(supabase,{
+    ownerId,workId,workDate:localDateKey()
+  });
+  const {data:history,error:hErr}=historyRes;
+  const {data:daily,error:dErr}=dailyRes;
+  const {data:completed,error:cErr}=completedRes;
 
   if(hErr || dErr || cErr){
     console.warn(hErr||dErr||cErr);
@@ -3094,11 +3043,7 @@ async function renderCompletedArchiveForPreview(workId){
   artArchiveGrid.innerHTML='';
   if(!workId)return;
 
-  const {data:work,error:workError}=await supabase
-    .from('atelier_works')
-    .select('id,owner_id,status,cover_image_url,completed_at,total_work_seconds')
-    .eq('id',workId)
-    .maybeSingle();
+  const {data:work,error:workError}=await fetchWorkById(supabase,workId);
 
   if(workError){
     console.warn('preview work lookup',workError);
@@ -3106,13 +3051,7 @@ async function renderCompletedArchiveForPreview(workId){
   }
   if(!work || work.status!=='completed' || !work.owner_id)return;
 
-  const {data:completed,error:completedError}=await supabase
-    .from('atelier_works')
-    .select('id,cover_image_url,completed_at,total_work_seconds')
-    .eq('owner_id',work.owner_id)
-    .eq('status','completed')
-    .order('completed_at',{ascending:false})
-    .limit(50);
+  const {data:completed,error:completedError}=await fetchCompletedWorks(supabase,work.owner_id);
 
   if(completedError){
     console.warn('preview completed archive',completedError);
