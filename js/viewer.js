@@ -20,6 +20,7 @@ import {fetchWorldState,claimEasel,releaseEasel,heartbeatEasel,upsertPresence,fe
 import {findActiveWorkRow,createActiveWorkRow,uploadArtworkFile,completeWorkRow,fetchHistoryBundle,fetchWorkById,fetchCompletedWorks} from './artwork-api.js';
 import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSession,sendMagicLink,signOut} from './account-api.js';
 import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
+import {formatDuration,formatTodayWork} from './time-format.js';
 
 applyLocaleUI();
 
@@ -3852,23 +3853,6 @@ function updateWorkPrompt(){
   const center=box.getCenter(new THREE.Vector3());
   workPromptSprite.position.set(center.x,box.max.y+.62,center.z);
   workPromptSprite.visible=true;
-}
-
-function formatDuration(seconds){
-  const total=Math.floor(Math.max(0,seconds));
-  const hours=Math.floor(total/3600);
-  const minutes=Math.floor((total%3600)/60);
-  const secs=total%60;
-  if(hours>0)return `${hours}:${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
-  return `${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
-}
-
-function formatTodayWork(seconds){
-  const totalMinutes=Math.floor(Math.max(0,seconds)/60);
-  const hours=Math.floor(totalMinutes/60);
-  const minutes=totalMinutes%60;
-  if(hours<=0)return `${minutes}분`;
-  return `${hours}시간 ${minutes}분`;
 }
 
 function updateWorkTimer(dt){
