@@ -704,21 +704,22 @@ function enhanceMaterials(root){
           isEaselPart
         ) && !isActualCanvas;
 
-      // GLASS: subtle clear greenhouse glass, not a foggy overlay.
+      // GLASS: stronger storybook greenhouse glass.
+      // Only existing built-in MeshPhysicalMaterial properties are adjusted here.
       if(isGlass){
         const glass=new THREE.MeshPhysicalMaterial({
           name:'Atelier Clear Glass',
-          color:new THREE.Color('#f4fbff'),
+          color:new THREE.Color('#dfecef'),
           transparent:true,
-          opacity:0.10,
-          transmission:0.22,
-          roughness:0.07,
+          opacity:0.22,
+          transmission:0.34,
+          roughness:0.12,
           metalness:0,
           ior:1.45,
-          thickness:0.08,
+          thickness:0.12,
           clearcoat:1,
-          clearcoatRoughness:0.05,
-          envMapIntensity:0.85,
+          clearcoatRoughness:0.03,
+          envMapIntensity:1.55,
           side:THREE.DoubleSide,
           depthWrite:false,
           depthTest:true
