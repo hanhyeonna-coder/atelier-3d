@@ -1473,7 +1473,7 @@ function removeArtworkOverlayVisual(seat){
 
 function applyServerArtworks(rows){
   const now=Date.now();
-  const liveRows=(rows||[]).filter(row=>{
+  const displayRows=(rows||[]).filter(row=>{
     const isLegacyInlineArtwork=
       !row?.work_id &&
       typeof row?.image_url==='string' &&
@@ -1482,15 +1482,9 @@ function applyServerArtworks(rows){
       console.warn('Ignoring legacy inline artwork row',row.seat_index,row.display_name||'');
       return false;
     }
-
-    const lockUntil=resolveArtworkExhibitionUntil(row,ARTWORK_HOLD_MS,now);
-    if(!lockUntil){
-      console.warn('Ignoring expired easel artwork row',row.seat_index,row.display_name||'');
-      return false;
-    }
     return true;
   });
-  const bySeat=new Map(liveRows.map(r=>[r.seat_index,r]));
+  const bySeat=new Map(displayRows.map(r=>[r.seat_index,r]));
 
   for(const seat of seatSlots){
     const row=bySeat.get(seat.index);
@@ -2580,10 +2574,11 @@ function updateArtworkLocks(){
   const now=Date.now();
   for(const seat of seatSlots){
     if(!seat.artworkLockedUntil || seat.artworkLockedUntil>now)continue;
-
+    // After 24h the artwork remains displayed; only replacement becomes available.
     seat.artworkLockedUntil=0;
-    if(playerArtworkSeat===seat || savedArtworkSeatIndex===seat.index){
-      clearArtworkFromSeat(seat);
+    if(savedArtworkSeatIndex===seat.index){
+      savedArtworkLockedUntil=0;
+      saveProgress();
     }
   }
 }
@@ -2602,12 +2597,9 @@ function restoreSavedArtwork(){
   }
 
   if(savedArtworkLockedUntil && savedArtworkLockedUntil<=Date.now()){
-    savedArtworkDataUrl=null;
-    savedArtworkSeatIndex=null;
     savedArtworkLockedUntil=0;
     seat.artworkLockedUntil=0;
     saveProgress();
-    return;
   }
 
   const img=new Image();
@@ -3028,7 +3020,12 @@ async function requestPlayerSeat(seat){
 
   const claimed=await serverClaimSeat(seat);
   if(!claimed){
-    showStatus('방금 다른 사람이 먼저 앉았어요');
+    await fetchServerState();
+    if(seat.serverOccupant && seat.serverOccupant!==clientId){
+      showStatus('지금 다른 사람이 앉아 있어요');
+    }else{
+      showStatus('이젤 연결을 다시 확인했어요. 한 번 더 눌러주세요');
+    }
     return true;
   }
 
