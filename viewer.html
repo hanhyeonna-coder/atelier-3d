@@ -3016,6 +3016,7 @@ async function syncArtworkSnapshot(snapshot){
   activeWorkCoverUrl=stored.url;
 
   await supabase.from('atelier_artworks').delete().eq('owner_id',ownerId);
+  await supabase.from('atelier_artworks').delete().eq('seat_index',seat.index);
   const {error:artworkUpsertError}=await supabase.from('atelier_artworks').upsert({
     owner_id:ownerId,
     seat_index:seat.index,
@@ -3398,15 +3399,30 @@ artModal.addEventListener('click',e=>{
   if(e.target===artModal)closeArtworkPreview();
 });
 
+function seatHasVisibleArtwork(seat){
+  if(!seat)return false;
+  return getCanvasMeshesForSeat(seat).some(mesh=>{
+    const overlay=mesh.getObjectByName('Artwork Overlay');
+    return !!(overlay && overlay.visible!==false && overlay.material?.map);
+  });
+}
+
 function openArtworkPickerForSeat(seat){
   if(!playerSeat || seat!==playerSeat){
     showStatus('이젤에 앉아 있는 동안 내 캔버스를 클릭해 주세요');
     return true;
   }
 
-  if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId){
+  if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId && seatHasVisibleArtwork(seat)){
     showStatus('다른 사람의 작품은 수정할 수 없어요');
     return true;
+  }
+
+  // If the seat looks empty but an old owner row is still attached to this seat index
+  // after furniture remapping, treat that server owner as stale and allow a new upload.
+  if(seat.serverArtworkOwner && seat.serverArtworkOwner!==ownerId && !seatHasVisibleArtwork(seat)){
+    console.warn('Ignoring stale artwork owner on visually empty seat',seat.index,seat.serverArtworkOwner);
+    seat.serverArtworkOwner=null;
   }
 
   const canvases=getCanvasMeshesForSeat(seat);
