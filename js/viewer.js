@@ -67,11 +67,11 @@ const workPromptController=createWorkPromptController(scene);
 
 const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.05,200);
 
-const renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,IS_MOBILE_RENDER?1.35:2));
+const renderer=new THREE.WebGLRenderer({antialias:!IS_MOBILE_RENDER});
+renderer.setPixelRatio(Math.min(devicePixelRatio,IS_MOBILE_RENDER?1.2:2));
 renderer.setSize(innerWidth,innerHeight);
 renderer.shadowMap.enabled=true;
-renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.shadowMap.type=IS_MOBILE_RENDER?THREE.PCFShadowMap:THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=.92;
@@ -87,7 +87,7 @@ scene.add(hemi);
 const sun=new THREE.DirectionalLight(0xffddb5,1.72);
 sun.position.set(-8,10,-4);
 sun.castShadow=true;
-sun.shadow.mapSize.set(IS_MOBILE_RENDER?1024:2048,IS_MOBILE_RENDER?1024:2048);
+sun.shadow.mapSize.set(IS_MOBILE_RENDER?512:2048,IS_MOBILE_RENDER?512:2048);
 sun.shadow.camera.near=.5;
 sun.shadow.camera.far=35;
 sun.shadow.camera.left=-9;
@@ -102,7 +102,11 @@ fill.position.set(6,5,5);
 scene.add(fill);
 
 const DAY_SKY=new THREE.Color(0xd8e6ee);
+const SUNSET_SKY=new THREE.Color(0xf3a37f);
+const SUNSET_LATE_SKY=new THREE.Color(0xc66f7f);
 const NIGHT_SKY=new THREE.Color(0x08111f);
+const DAY_SUN_COLOR=new THREE.Color(0xffddb5);
+const SUNSET_SUN_COLOR=new THREE.Color(0xff9a59);
 let nightFactor=0;
 let lastNightLightingUpdate=0;
 const skyClouds=[];
@@ -238,6 +242,16 @@ function computeNightFactor(){
   if(h>=17.5 && h<20)return THREE.MathUtils.smoothstep((h-17.5)/2.5,0,1);
   if(h>=5 && h<7)return 1-THREE.MathUtils.smoothstep((h-5)/2,0,1);
   return 0;
+}
+
+function computeSunsetFactor(){
+  if(FORCE_NIGHT)return 0;
+  const d=new Date();
+  const h=d.getHours()+d.getMinutes()/60;
+  if(h<16.5 || h>=20)return 0;
+  const rise=THREE.MathUtils.smoothstep((h-16.5)/1.5,0,1);
+  const fall=1-THREE.MathUtils.smoothstep((h-18.4)/1.6,0,1);
+  return THREE.MathUtils.clamp(rise*fall,0,1);
 }
 
 const nightWindowMeshes=[];
@@ -387,25 +401,43 @@ function updateDayNightLighting(force=false){
   lastNightLightingUpdate=now;
 
   nightFactor=computeNightFactor();
-  scene.background=DAY_SKY.clone().lerp(NIGHT_SKY,nightFactor);
+  const sunsetFactor=computeSunsetFactor();
+
+  // Day -> warm sunset -> late rose dusk -> existing night.
+  const sunsetPhase=THREE.MathUtils.clamp(sunsetFactor,0,1);
+  const duskPhase=THREE.MathUtils.clamp(nightFactor/.72,0,1);
+  const sky=DAY_SKY.clone();
+  if(sunsetPhase>0){
+    const warmSky=SUNSET_SKY.clone().lerp(SUNSET_LATE_SKY,THREE.MathUtils.clamp(nightFactor/.55,0,1));
+    sky.lerp(warmSky,sunsetPhase);
+  }
+  sky.lerp(NIGHT_SKY,nightFactor);
+  scene.background=sky;
+
   hemi.intensity=THREE.MathUtils.lerp(1.08,.23,nightFactor);
   sun.intensity=THREE.MathUtils.lerp(1.72,.12,nightFactor);
+  sun.color.copy(DAY_SUN_COLOR).lerp(SUNSET_SUN_COLOR,sunsetFactor).lerp(new THREE.Color(0xb9c9e8),nightFactor*.72);
   fill.intensity=THREE.MathUtils.lerp(.35,.15,nightFactor);
+  fill.color.set(0xc6ddff).lerp(new THREE.Color(0xf0a6b5),sunsetFactor*.55);
   scene.environmentIntensity=THREE.MathUtils.lerp(.38,.12,nightFactor);
-  starField.visible=nightFactor>.06;
+  starField.visible=nightFactor>.16;
 
   const dayCloud=new THREE.Color(0xffffff);
+  const sunsetCloud=new THREE.Color(0xffc3ad);
   const nightCloud=new THREE.Color(0xaab6c8);
   for(const cloud of skyClouds){
     cloud.traverse(o=>{
       if(!o.isSprite || !o.material)return;
-      o.material.color.copy(dayCloud).lerp(nightCloud,nightFactor);
+      o.material.color.copy(dayCloud).lerp(sunsetCloud,sunsetFactor).lerp(nightCloud,nightFactor);
       o.material.opacity=THREE.MathUtils.lerp(.98,.14,nightFactor);
     });
   }
   for(const reflection of waterCloudReflections){
     reflection.material.opacity=THREE.MathUtils.lerp(.58,.22,nightFactor);
-    reflection.material.color.set(0xd5edf4).lerp(new THREE.Color(0x718092),nightFactor);
+    reflection.material.color
+      .set(0xd5edf4)
+      .lerp(new THREE.Color(0xf0aa96),sunsetFactor*.72)
+      .lerp(new THREE.Color(0x718092),nightFactor);
   }
 
   updateRegisteredNightLights(nightFactor);
@@ -413,6 +445,7 @@ function updateDayNightLighting(force=false){
 updateDayNightLighting(true);
 
 const clock=new THREE.Clock();
+let mobileFrameIndex=0;
 
 const clientId=getOrCreateClientId();
 let ownerId=clientId;
@@ -508,7 +541,8 @@ const BRIDGE_END_Z=15.8;
 const GALLERY_CENTER_Z=18.4;
 const GALLERY_HALF_WIDTH=5.2;
 const GALLERY_HALF_DEPTH=3.7;
-const MOVE_SPEED=1.85;
+const MOVE_SPEED=IS_MOBILE_RENDER?2.02:1.85;
+const WALK_ANIM_SPEED=IS_MOBILE_RENDER?1.2:1;
 const CENTER_BLOCK_RADIUS=1.90;
 const MODEL_YAW_CORRECTION=-THREE.MathUtils.degToRad(97.005); // Blender/glTF front correction. Keep in one place.
 const SIT_YAW_CORRECTION=0; // Seat faceDir already points from stool to easel; no extra quarter-turn.
@@ -807,6 +841,7 @@ function playAvatar(name,fade=.12){
   next.enabled=true;
   next.clampWhenFinished=false;
   next.setLoop(THREE.LoopRepeat,Infinity);
+  next.setEffectiveTimeScale(name==='Avatar_Walk'?WALK_ANIM_SPEED:1);
   next.reset().play();
 
   if(currentAction)currentAction.crossFadeTo(next,fade,false);
@@ -1615,6 +1650,7 @@ function playRemote(entry,name){
   if(name!=='Avatar_Greet' && (entry?.greetingUntil||0)>performance.now())return;
   const next=entry?.actions?.[name];
   if(!next || entry.current===next)return;
+  next.setEffectiveTimeScale(name==='Avatar_Walk'?WALK_ANIM_SPEED:1);
   next.reset().play();
   if(entry.current)entry.current.crossFadeTo(next,.12,false);
   entry.current=next;
@@ -4135,24 +4171,26 @@ function tick(){
   requestAnimationFrame(tick);
 
   const dt=Math.min(clock.getDelta(),.05);
+  mobileFrameIndex++;
+  const secondaryFrame=!IS_MOBILE_RENDER || mobileFrameIndex%2===0;
 
   if(avatarMixer)avatarMixer.update(dt);
-  remoteAvatars.forEach(entry=>entry.mixer?.update(dt));
+  if(secondaryFrame)remoteAvatars.forEach(entry=>entry.mixer?.update(IS_MOBILE_RENDER?dt*2:dt));
   updateRemoteMotion(dt);
-  updateProximityNameLabels();
+  if(secondaryFrame)updateProximityNameLabels();
 
-  if(npcs.length)updateNPCs(dt,performance.now()/1000);
+  if(npcs.length&&secondaryFrame)updateNPCs(IS_MOBILE_RENDER?dt*2:dt,performance.now()/1000);
   if(envMixer)envMixer.update(dt);
-  if(extEnvMixer)extEnvMixer.update(dt);
+  if(extEnvMixer&&secondaryFrame)extEnvMixer.update(IS_MOBILE_RENDER?dt*2:dt);
   updateBoatMotion(dt);
-  updateAtmosphericClouds(dt);
-  updateSnow(dt);
+  if(secondaryFrame)updateAtmosphericClouds(IS_MOBILE_RENDER?dt*2:dt);
+  if(secondaryFrame)updateSnow(IS_MOBILE_RENDER?dt*2:dt);
   updateDayNightLighting();
   updateStarTwinkle(performance.now());
 
   // Animate only known water materials; avoid traversing the entire scene every frame.
   const rippleNow=performance.now();
-  for(const waterMaterial of animatedWaterMaterials){
+  if(secondaryFrame)for(const waterMaterial of animatedWaterMaterials){
     if(!waterMaterial?.normalMap)continue;
     waterMaterial.normalMap.offset.x=(waterMaterial.normalMap.offset.x+dt*0.075)%1;
     waterMaterial.normalMap.offset.y=(waterMaterial.normalMap.offset.y+dt*0.042)%1;
