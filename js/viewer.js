@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
@@ -26,6 +24,7 @@ import {constrainWalkable as constrainWalkableByConfig,facingYaw} from './moveme
 import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
 import {createWorkPromptController} from './work-prompt.js';
+import {loadGLB,loadOptionalGLB} from './asset-loader.js';
 
 applyLocaleUI();
 
@@ -411,10 +410,6 @@ function updateDayNightLighting(force=false){
 }
 updateDayNightLighting(true);
 
-const loader=new GLTFLoader();
-const dracoLoader=new DRACOLoader();
-dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/');
-loader.setDRACOLoader(dracoLoader);
 const clock=new THREE.Clock();
 
 const clientId=getOrCreateClientId();
@@ -552,19 +547,6 @@ let downX=0,downY=0;
 let lastX=0,lastY=0;
 
 const keys=new Set();
-
-function loadGLB(url){
-  return new Promise((resolve,reject)=>loader.load(url,resolve,undefined,error=>{
-    console.error('[ATELIER] Failed to load model:',url,error);
-    reject(error);
-  }));
-}
-function loadOptionalGLB(url){
-  return loadGLB(url).catch(error=>{
-    console.warn('[ATELIER] Optional model unavailable:',url,error);
-    return null;
-  });
-}
 
 const atelierWaterNormal=makeWaterNormalTexture();
 const lanternLights=[];
