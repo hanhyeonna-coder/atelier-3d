@@ -2391,7 +2391,7 @@ async function serverHeartbeat(){
 }
 
 async function syncArtworkSnapshot(snapshot){
-  const {dataUrl,seatIndex,workSeconds}=snapshot;
+  const {dataUrl,seatIndex,workSeconds,lockedUntil}=snapshot;
   const seat=seatSlots.find(s=>s.index===seatIndex);
   if(!seat || !dataUrl)return;
 
@@ -2430,7 +2430,7 @@ async function syncArtworkSnapshot(snapshot){
     work_id:workId,
     work_seconds:Math.floor(workSeconds),
     display_name:displayName,
-    locked_until:null,
+    locked_until:new Date(lockedUntil||Date.now()+ARTWORK_HOLD_MS).toISOString(),
     updated_at:new Date().toISOString()
   },{onConflict:'seat_index'});
 
@@ -2481,8 +2481,8 @@ async function syncArtworkSnapshot(snapshot){
 
   await syncDailyWorkToServer();
 }
-function enqueueArtworkSave(dataUrl,seatIndex,workSeconds){
-  const snapshot={dataUrl,seatIndex,workSeconds};
+function enqueueArtworkSave(dataUrl,seatIndex,workSeconds,lockedUntil){
+  const snapshot={dataUrl,seatIndex,workSeconds,lockedUntil};
   artworkSaveQueue=artworkSaveQueue
     .then(()=>syncArtworkSnapshot(snapshot))
     .catch(err=>{
@@ -2633,12 +2633,10 @@ function releasePlayerSeat(){
     if(playerSeat.occupiedBy==='player')playerSeat.occupiedBy=null;
 
     if(playerArtworkSeat===playerSeat && savedArtworkDataUrl){
-      const until=Date.now()+ARTWORK_HOLD_MS;
-      playerSeat.artworkLockedUntil=until;
-      savedArtworkLockedUntil=until;
+      // Exhibition timing starts when the artwork is uploaded, not when the artist stands up.
+      playerSeat.artworkLockedUntil=savedArtworkLockedUntil;
       savedArtworkSeatIndex=playerSeat.index;
       saveProgress();
-      lockServerArtwork(playerSeat,until);
     }
   }
 
@@ -2832,6 +2830,11 @@ function openArtworkPreview(seat){
   const src=getSeatArtworkDataUrl(seat);
   if(!src)return false;
 
+  if(isArtworkLocked(seat) && !isMyArtworkSeat(seat)){
+    blockedPromptSeat=seat;
+    blockedPromptUntil=performance.now()+12000;
+  }
+
   const seatWorkId=seat?.userData?.workId||null;
   const isOwnActiveArtwork=
     !!activeWorkId &&
@@ -2888,6 +2891,7 @@ function openArtworkPickerForSeat(seat){
   }
 
   if(
+    isArtworkLocked(seat) &&
     seat.serverArtworkOwner &&
     seat.serverArtworkOwner!==ownerId &&
     seatHasVisibleArtwork(seat) &&
@@ -2976,10 +2980,10 @@ function applyArtworkImage(img){
   playerArtworkSeat=playerSeat;
   savedArtworkDataUrl=makeStoredArtworkDataUrl(img);
   savedArtworkSeatIndex=playerSeat.index;
-  savedArtworkLockedUntil=0;
-  playerSeat.artworkLockedUntil=0;
+  savedArtworkLockedUntil=Date.now()+ARTWORK_HOLD_MS;
+  playerSeat.artworkLockedUntil=savedArtworkLockedUntil;
   saveProgress();
-  enqueueArtworkSave(savedArtworkDataUrl,playerSeat.index,currentWorkElapsedSeconds)
+  enqueueArtworkSave(savedArtworkDataUrl,playerSeat.index,currentWorkElapsedSeconds,savedArtworkLockedUntil)
     .then(()=>showStatus('작품 진행 단계가 저장됐어요'));
   showStatus('작품 저장 중...');
 }
@@ -3017,19 +3021,9 @@ async function requestPlayerSeat(seat){
   }
 
   if(isArtworkLocked(seat) && !isMyArtworkSeat(seat)){
-    showStatus(blockedEaselStatus(seat),4200); blockedPromptSeat=seat; blockedPromptUntil=performance.now()+12000;
-    return true;
-  }
-
-  // Only the actual artwork owner may reopen a locked easel immediately.
-  if(isArtworkLocked(seat) && isMyArtworkSeat(seat)){
-    seat.artworkLockedUntil=0;
-    savedArtworkLockedUntil=0;
-    supabase.from('atelier_artworks')
-      .update({locked_until:null,updated_at:new Date().toISOString()})
-      .eq('owner_id',ownerId)
-      .eq('seat_index',seat.index);
-    saveProgress();
+    showStatus(blockedEaselStatus(seat),4200);
+    blockedPromptSeat=seat;
+    blockedPromptUntil=performance.now()+12000;
   }
 
   if(seat.occupiedBy && seat.occupiedBy!=='player'){
@@ -4128,11 +4122,15 @@ function tick(){
 
   updateWorkTimer(dt);
   updateArtworkLocks();
+  const seatedBlockedSeat=
+    playerSeat && isArtworkLocked(playerSeat) && !isMyArtworkSeat(playerSeat)
+      ? playerSeat
+      : null;
   workPromptController.update({
     playerSeat,
     playerArtworkSeat,
-    blockedPromptSeat,
-    blockedPromptUntil,
+    blockedPromptSeat:seatedBlockedSeat||blockedPromptSeat,
+    blockedPromptUntil:seatedBlockedSeat?Number.POSITIVE_INFINITY:blockedPromptUntil,
     isArtworkLocked,
     blockedEaselPrompts,
     workPrompts:WORK_PROMPTS
