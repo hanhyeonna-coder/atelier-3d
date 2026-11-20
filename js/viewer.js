@@ -20,7 +20,7 @@ import {adoptGuestData,fetchProfile,updateProfileName,createProfile,getAuthSessi
 import {remainingExhibitionText,isArtworkLocked,blockedEaselStatus,blockedEaselPrompts} from './easel-policy.js';
 import {formatDuration,formatTodayWork} from './time-format.js';
 import {normalizeAvatarOrigin,isolateAvatarMaterials,recolorBeret} from './avatar-utils.js';
-import {constrainWalkable as constrainWalkableByConfig,facingYaw} from './movement-geometry.js';
+import {constrainWalkable as constrainWalkableByConfig,isWalkableWorldPosition as isWalkableByConfig,facingYaw} from './movement-geometry.js';
 import {makeArtworkOverlay} from './artwork-render.js';
 import {makeStarGlowTexture,makeWarmGlowTexture,makeWaterNormalTexture} from './texture-factory.js';
 import {createWorkPromptController} from './work-prompt.js';
@@ -32,12 +32,13 @@ applyLocaleUI();
 
 const loadingCopiesKo=[
   '좀쓰 화실에 온 걸 환영한다',
-  '조금이라도 그려라, 그리고 흔적 남겨라'
+  '조금이라도 그려라, 그리고 흔적 남겨라',
+  '자신있게 올려! 넌 화가야!'
 ];
 const loadingCopiesEn=[
-  'Entering the atelier...',
-  'Let’s paint together today...',
-  'Someone is waiting to see your art'
+  'Welcome to Jomss Atelier',
+  'Draw something, even a little. Leave your mark.',
+  'Post it with confidence! You are an artist!'
 ];
 let loadingCopyIndex=0;
 const loadingCopies=IS_KO?loadingCopiesKo:loadingCopiesEn;
@@ -847,6 +848,10 @@ const WALKABLE_GEOMETRY={
   galleryHalfWidth:GALLERY_HALF_WIDTH,
   galleryHalfDepth:GALLERY_HALF_DEPTH
 };
+
+function isWalkableWorldPosition(position){
+  return isWalkableByConfig(position,WALKABLE_GEOMETRY);
+}
 
 function constrainWalkable(next,previous){
   return constrainWalkableByConfig(next,previous,WALKABLE_GEOMETRY);
@@ -3264,28 +3269,46 @@ function setClickTarget(clientX,clientY){
   showStatus('이동 중 → '+hit.x.toFixed(1)+', '+hit.z.toFixed(1));
 }
 
+const CAMERA_DRAG_THRESHOLD=12;
 let cameraDragActive=false;
 
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 
-renderer.domElement.addEventListener('click',e=>{
-  // Left click has one job only: move / interact.
-  if(e.button!==0)return;
-  setClickTarget(e.clientX,e.clientY);
-});
-
 renderer.domElement.addEventListener('pointerdown',e=>{
-  if(e.button!==2)return;
-  // Camera orbit is explicit: right-button drag only.
-  cameraDragActive=true;
-  lastX=e.clientX;
-  lastY=e.clientY;
-  renderer.domElement.setPointerCapture?.(e.pointerId);
+  if(e.button===0){
+    pointerDown=true;
+    dragged=false;
+    cameraDragActive=false;
+    downX=lastX=e.clientX;
+    downY=lastY=e.clientY;
+    renderer.domElement.setPointerCapture?.(e.pointerId);
+    return;
+  }
+
+  if(e.button===2){
+    cameraDragActive=true;
+    dragged=true;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    renderer.domElement.setPointerCapture?.(e.pointerId);
+  }
 });
 
 renderer.domElement.addEventListener('pointermove',e=>{
-  if(!cameraDragActive)return;
+  if(!pointerDown && !cameraDragActive)return;
 
+  if(pointerDown && !cameraDragActive){
+    const distance=Math.hypot(e.clientX-downX,e.clientY-downY);
+    if(distance>=CAMERA_DRAG_THRESHOLD){
+      cameraDragActive=true;
+      dragged=true;
+      lastX=e.clientX;
+      lastY=e.clientY;
+      return;
+    }
+  }
+
+  if(!cameraDragActive)return;
   const dx=e.clientX-lastX;
   const dy=e.clientY-lastY;
   camYaw-=dx*.006;
@@ -3295,12 +3318,27 @@ renderer.domElement.addEventListener('pointermove',e=>{
 });
 
 renderer.domElement.addEventListener('pointerup',e=>{
-  if(e.button!==2)return;
-  cameraDragActive=false;
-  renderer.domElement.releasePointerCapture?.(e.pointerId);
+  if(e.button===0){
+    if(pointerDown && !dragged){
+      setClickTarget(e.clientX,e.clientY);
+    }
+    pointerDown=false;
+    dragged=false;
+    cameraDragActive=false;
+    renderer.domElement.releasePointerCapture?.(e.pointerId);
+    return;
+  }
+
+  if(e.button===2){
+    cameraDragActive=false;
+    dragged=false;
+    renderer.domElement.releasePointerCapture?.(e.pointerId);
+  }
 });
 
 renderer.domElement.addEventListener('pointercancel',e=>{
+  pointerDown=false;
+  dragged=false;
   cameraDragActive=false;
   renderer.domElement.releasePointerCapture?.(e.pointerId);
 });
